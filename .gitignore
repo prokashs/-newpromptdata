@@ -1,0 +1,12 @@
+# PyCharm configuration folder
+.idea/
+
+# Python Virtual Environment (crucial to exclude this so you don't track thousands of library files)
+.venv/
+
+# Local scratchpad notes
+scratch.txt
+
+# Python bytecode
+__pycache__/
+*.pyc
