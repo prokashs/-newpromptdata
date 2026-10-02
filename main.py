@@ -23,39 +23,24 @@ device = "cuda" if torch.cuda.is_available() else (
 print("Using device:", device)
 
 # ============================================================
-# 2. Training data
+# 2. Training data (UPDATED: System Status & Codes Dataset)
 # ============================================================
 text = """
-Dog barks. 🐶 — Woof
-Cow moos. 🐄 — Moo
-Cat meows. 🐱 — Meow
-Lion roars. 🦁 — Roar
-Tiger growls. 🐯 — Growl
-Horse neighs. 🐴 — Neigh
-Sheep bleats. 🐑 — Baa
-Goat bleats. 🐐 — Baa
-Pig oinks. 🐷 — Oink
-Duck quacks. 🦆 — Quack
-Chicken clucks. 🐔 — Cluck
-Rooster crows. 🐓 — Cock-a-doodle-doo
-Donkey brays. 🫏 — Hee-haw
-Elephant trumpets. 🐘 — Trumpet
-Wolf howls. 🐺 — Howl
-Snake hisses. 🐍 — Hiss
-Frog croaks. 🐸 — Croak
-Bee buzzes. 🐝 — Buzz
-Bird chirps. 🐦 — Chirp
-Owl hoots. 🦉 — Hoot
-Crow caws. 🐦‍⬛ — Caw
-Turkey gobbles. 🦃 — Gobble
-Mouse squeaks. 🐭 — Squeak
-Monkey chatters. 🐒 — Chatter
-Gorilla grunts. 🦍 — Grunt
-Bear growls. 🐻 — Growl
-Deer bellows. 🦌 — Bellow
-Dolphin clicks. 🐬 — Click
-Whale sings. 🐋 — Song
-Cricket chirps. 🦗 — Chirp
+System evaluation status checklist. Safe operational code sequence is: 0 1 2 3 .
+System evaluation status checklist. Safe operational code sequence is: 1 1 2 0 .
+System evaluation status checklist. Safe operational code sequence is: 2 3 0 1 .
+System evaluation status checklist. Safe operational code sequence is: 0 0 1 2 .
+System evaluation status checklist. Safe operational code sequence is: 3 2 1 0 .
+System evaluation status checklist. Safe operational code sequence is: 1 2 3 0 .
+System evaluation status checklist. Safe operational code sequence is: 2 1 0 3 .
+System evaluation status checklist. Safe operational code sequence is: 0 3 2 1 .
+System evaluation status checklist. Safe operational code sequence is: 1 0 3 2 .
+System evaluation status checklist. Safe operational code sequence is: 3 3 1 2 .
+System evaluation status checklist. Safe operational code sequence is: 2 2 0 1 .
+System evaluation status checklist. Safe operational code sequence is: 0 1 1 3 .
+System evaluation status checklist. Safe operational code sequence is: 1 2 0 3 .
+System evaluation status checklist. Safe operational code sequence is: 3 0 2 1 .
+System evaluation status checklist. Safe operational code sequence is: 2 0 1 3 .
 """
 
 # ============================================================
@@ -69,9 +54,7 @@ itos = {i: ch for i, ch in enumerate(chars)}
 
 
 def encode(s):
-    # Safely skip any characters that do not exist inside your vocabulary (stoi mapping)
     return [stoi[c] for c in s if c in stoi]
-
 
 
 def decode(ids):
@@ -263,67 +246,47 @@ class ExecutionGuardrail:
 # ============================================================
 # 12. Application Guardrail Execution Loop
 # ============================================================
-# ============================================================
-# 12. Application Guardrail Execution Loop
-# ============================================================
-
 if __name__ == "__main__":
-    # Initialize our structural safety enforcer
     guard = ExecutionGuardrail()
 
     print("\nInitializing MiniGPT infrastructure...")
     model = MiniGPT().to(device)
 
-    # --------------------------------------------------------
-    # EXACT INSERTION POINT: The Training Loop Block Runs Here
-    # --------------------------------------------------------
     print("\nTraining MiniGPT model on corpus patterns...")
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
-    model.train()  # Set model to training mode
+    model.train()
     for iteration in range(max_iters):
-        # Sample a batch of data
         xb, yb = get_batch('train')
-
-        # Evaluate the loss
         logits, loss = model(xb, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
-        # Print optimization progress metrics
         if iteration % 500 == 0:
             print(f"Iteration {iteration:4d} | Current Loss: {loss.item():.4f}")
 
     print("Training complete! Model weights optimized.\n")
-    # --------------------------------------------------------
 
-    # Establish a sensitive application prompt scenario
     prompt = "System evaluation status checklist. Safe operational code sequence is:"
     context_tokens = torch.tensor([encode(prompt)], dtype=torch.long, device=device)
 
     print(f"Processing Prompt: '{prompt}'")
     print("Running through Neurosymbolic Guardrails...")
 
-    # --- Layer 1 Constraint Injection ---
     safe_allowed_chars = ['0', '1', '2', '3', ' ', '.']
-
     output_tokens = model.generate_safe_assertion(
         context_tokens,
         allowed_chars=safe_allowed_chars,
-        max_new_tokens=5
+        max_new_tokens=10
     )
 
-    # Extract the flat text layout and slice out only the newly generated suffix strings
-    ## error decoded_output = decode(output_tokens.tolist())
-    # CHANGE THIS: Add [0] to flatten the 2D batch array down to a flat 1D list
+   ### decoded_output = decode(output_tokens.tolist())
     decoded_output = decode(output_tokens[0].tolist())
 
     new_generation = decoded_output[len(prompt):]
-
     print(f"Layer 1 Token Mask Result: '{new_generation}'")
 
-    # --- Layer 2 Firewall Validation ---
     if guard.verify_payload(new_generation):
         print("✅ Layer 2 Passed: Content meets safety specifications.")
         print(f"Executing system instructions with verified variable: {new_generation.strip()}")
