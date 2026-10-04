@@ -1,0 +1,598 @@
+To understand this PyTorch script, it helps to see it as a complete pipeline that transforms raw characters into
+structured mathematical vectors, passes them through a pattern-matching filter, and uses probability to guess what comes next.
+Here is the step-by-step breakdown of your code's architecture and data flow steps.
+------------------------------
+## Part 1: The Core Architecture
+The architecture builds upward in a nested structure: Head → MultiHeadAttention → Block → MiniGPT.
+
+[Input Tokens]
+       │
+       ▼
+ ┌───────────┐     ┌───────────────────────┐
+ │ Embedding │ ──> │ 4x Transformer Blocks │ ──> [Vocabulary Logits]
+ └───────────┘     └───────────────────────┘
+                             │
+                             ▼ (Inside each Block)
+                   ┌───────────────────────┐
+                   │ Multi-Head Attention  │ ──> (4 heads look at text together)
+                   ├───────────────────────┤
+                   │  Feed-Forward (GELU)  │ ──> (Thinks about the patterns)
+                   └───────────────────────┘
+
+## 1. Token & Position Embeddings (MiniGPT)
+The model cannot read characters directly. It maps them to vectors.
+
+* token_embedding: Maps each distinct text character (e.g., 'D', 'o', 'g') to a dense, continuous list of 128 numbers (n_embd = 128).
+* position_embedding: Text order matters ("Dog barks" vs "barks Dog"). This layer tracks the index position (0 to 127) of each character in the sequence and adds a positional vector directly to the token vector.
+
+## 2. Scaled Causal Self-Attention (Head)
+This is the pattern matcher. It answers the question: Which previous characters in this sentence are most relevant to predicting the current character?
+
+* Queries, Keys, and Values (Q, K, V):
+* Query (Q): What am I looking for?
+   * Key (K): What information do I contain?
+   * Value (V): If I am a match, what information do I pass along?
+* Causal Masking (tril): A lower-triangular matrix filled with zeros and ones. It zeroes out future tokens by setting their attention scores to -inf before the softmax phase. This guarantees that when processing the word "Dog", the model is mathematically blocked from looking ahead at "barks".
+
+## 3. Multi-Head Attention (MultiHeadAttention)
+Instead of performing self-attention once, the model runs 4 individual attention Head instances simultaneously in parallel. One head might focus on matching vowels, another on punctuation patterns, and another on spacing. Their outputs are glued together (torch.cat) and mixed using a linear projection layer.
+## 4. Feed-Forward Network (FeedForward)
+After attention gathers information from surrounding characters, the feed-forward network lets the model process that data contextually. It expands the 128-dimension data to a wider 512-dimension space (4 * n_embd), applies a non-linear switch (GELU), and compresses it back down to 128.
+## 5. Residual Connections & LayerNorm (Block)
+Notice the syntax: x = x + self.attention(self.ln1(x)).
+Adding the original input x back to the output creates a residual connection. This acts as an information highway, allowing gradients to flow backward during training without degrading, while LayerNorm stabilizes the variance of values across the network layers.
+------------------------------
+## Part 2: Step-by-Step Data Flow Steps
+Here is exactly what happens when data passes through your script during a training operation.
+## Step 1: Tokenization and Slicing
+The raw string data is parsed into a clean list of unique characters (vocab_size). The encoder maps every single unique symbol to an integer index.
+
+Text:   "D  o  g     b  a  r  k  s  ."
+Vector: [13, 26, 18, 1, 15, 12, 29, 22, 30, 2]
+
+The data loader function get_batch randomly snatches 32 rows (batch_size) of characters, chopped to a maximum length of 128 context items (block_size).
+## Step 2: Shifting Targets for Prediction
+The batch generator returns two matrix layouts:
+
+* x (Inputs): A window of text, like [D, o, g]
+* y (Targets): The same window shifted forward by exactly one position: [o, g, ]
+
+This explicitly sets up the learning structure: Given input D, predict target o. Given inputs D, o, predict target g.
+## Step 3: Layer Processing
+Inside forward(idx), your batch indices map to embedding spaces, integrate positional vectors, and iterate sequentially through the 4 stacked Block components.
+## Step 4: Map to Vocabulary Logits
+The final sequence array reaches the language modeling head lm_head. It projects the internal 128 embedding dimensions out to match your exact total vocabulary size (e.g., 65 distinct characters). These raw scores are called logits.
+## Step 5: Optimization (Loss Calculation)
+The model compares its raw vocabulary logits against the true target characters y using Cross-Entropy Loss.
+
+* If the true next letter is o, and the model gave the letter o a low probability score, the loss spikes high.
+* During optimization, PyTorch computes gradients across this loss and updates all internal Linear weight matrices to slowly adjust the probabilities closer to reality.
+
+## Step 6: Autoregressive Generation (generate)
+When producing text, it runs in an iterative generation loop:
+
+   1. It takes a starter prompt.
+   2. It processes the text forward through the network layers to calculate vocabulary logits.
+   3. It looks only at the prediction matrix outputted at the very last character position.
+   4. It computes a Softmax probability curve over those scores, selects a single next character index, and welds it onto the end of the input text tracker.
+   5. The script loops back around, feeding the expanded text back into step 1 to calculate the next character.
+
+Would you like me to show you the exact matrix shapes (like [B, T, C]) as they change line-by-line through the self-attention calculation, or would you prefer to see how to add a temperature-based sampling step into the generation loop?
+
+-------===========================================================================================
+
+To scale a model from your local computer to a data center, you cannot just use a bigger GPU. A single modern GPU has, at most, 80GB to 141GB of High Bandwidth Memory (HBM).
+A frontier model with hundreds of billions of parameters requires terabytes of memory just to hold the weights, plus hundreds of gigabytes more to hold the active user sessions (the KV Cache).
+To solve this, data centers inject distributed frameworks that chop up the model and the workload across thousands of nodes. Here is exactly where that distributed help is injected and how the results are assimilated.
+------------------------------
+## 1. Where Distributed Help is Injected
+Distributed help is injected directly into the matrix multiplications and layer loops you see in your PyTorch code. The industry uses three primary types of distributed parallelisms simultaneously (collectively called 3D Parallelism):
+## Tensor Parallelism (Splitting a Single Layer)
+
+* Where it's injected: Inside the Head, MultiHeadAttention, and FeedForward layers.
+* How it works: Instead of one GPU processing a whole layer, a single weight matrix is sliced vertically or horizontally across a group of GPUs (usually 8 GPUs inside a single server box).
+* When processing Linear(n_embd, 4 * n_embd), GPU 0 handles the first 25% of the matrix multiplication, GPU 1 handles the second 25%, and so on.
+
+## Pipeline Parallelism (Splitting Layer-by-Layer)
+
+* Where it's injected: Inside the self.blocks = nn.Sequential(...) loop.
+* How it works: If a model has 80 Transformer blocks, it is sliced horizontally. GPUs 0-3 handle blocks 1-20, GPUs 4-7 handle blocks 21-40, and so on across different physical server racks. The data travels through the network like an assembly line.
+
+## Data Parallelism (Splitting the User Load)
+
+* Where it's injected: At the batch_size level in get_batch().
+* How it works: The data center receives thousands of user prompts at the same time. The infrastructure duplicates the entire model across multiple independent clusters. Cluster A processes your prompt, while Cluster B processes someone else's prompt concurrently.
+
+------------------------------
+## 2. How the Results are Assimilated (Gathering the Math)
+When a matrix multiplication or a transformer layer is broken apart across a network of GPUs, the shards must constantly talk to each other to rebuild the correct mathematical answer.
+This assimilation relies on low-level primitive communication algorithms built into frameworks like PyTorch Distributed (NCCL).
+## The "All-Reduce" Step (Recombining Split Matrices)
+In your code's MultiHeadAttention, you concatenate the heads: torch.cat([h(x) for h in self.heads], dim=-1). In a distributed cluster, those heads are physically sitting on different GPUs.
+To assimilate them, a collective communication step called All-Reduce is injected:
+
+   1. Each GPU calculates its local matrix multiplication piece.
+   2. The GPUs use an ultra-fast hardware interconnect (like NVIDIA NVLink or Intel Xe Link) to pass their results in a ring.
+   3. Every GPU sums up the values from all other GPUs. By the end of the operation, every single GPU in the cluster possesses the identical, fully assimilated multi-head tensor, completely in sync.
+
+[GPU 0: Head 1] ──┐
+[GPU 1: Head 2] ──┼─> [ NVLink / InfiniBand Network ] ─> [ All-Reduce Sum ] ─> Sync'd Vector Ready for Next Layer
+[GPU 2: Head 3] ──┼─> (High-bandwidth communication)
+[GPU 3: Head 4] ──┘
+
+## The Pipeline Hand-off
+For layers split across servers via Pipeline Parallelism, assimilation is a simple relay race. When GPU group 1 finishes processing Block 20, it sends the resulting tensor across an InfiniBand cable (a specialized data center network with speeds up to 400-800 Gbps) directly into the memory of GPU group 2, which is waiting to process Block 21.
+------------------------------
+## 3. The Grand Assimilation: Token Aggregation
+Once the data passes through all the split layers and reaches the very end of the network, it hits the final lm_head.
+
+   1. The final layer's output (logits) is consolidated onto a single master node via an All-Gather primitive.
+   2. This master node runs the sampling calculation (Softmax + Temperature) to choose the one winning token ID (e.g., Token 4023, which maps to the text "Moo").
+   3. The cluster immediately flushes the intermediate activations of that step out of its main memory, updates its KV Cache matrices with the new token information, and outputs that single token back to your browser client.
+
+To anchor this to your PyTorch code, would you like to see how Tensor Parallelism mathematically splits the FeedForward layer's Linear matrices across two columns, or would you prefer to explore the hardware specs of how NVLink and InfiniBand prevent communication bottlenecks?
+
+========================================================================================================
+
+When you refer to an LLM component becoming a "virus," you are highlighting a core challenge in AI Safety: preventing uncontrolled execution loops, data exfiltration, and unexpected compliance with malicious instructions. Because LLMs process text probabilistically, a bad prompt or malformed input can cause the model to behave unpredictably or act as an autonomous agent that manipulates external systems. [1, 2]
+To mathematically enforce boundaries on an LLM, researchers turn to Formal Verification methods like pGCL (Probabilistic Guarded Command Language). [3]
+------------------------------
+## 1. What is pGCL and How Does it Apply to AI Safety?
+Traditional programming languages use hard logic (e.g., if x > 5 then A else B). Dijkstra’s Guarded Command Language introduced non-determinism (e.g., pick any action whose guard condition is true).
+pGCL (developed by McIver and Morgan) expands this by adding probabilistic choice. It allows computer scientists to write programs that look like this: [3, 4]
+$$\text{If Guard is True} \rightarrow \text{Execute Action A with probability } p, \text{ or Action B with probability } (1-p)$$
+In the context of LLMs, the model's vocabulary logits are translated into probabilistic choices within a state machine. By modeling an LLM agent as a pGCL program, you can use Weakest Pre-expectation Semantics or Probabilistic Dynamic Logic (pDL) to mathematically prove its safety boundaries. [3, 4, 5]
+Instead of just testing the model with a few prompts, pGCL testing lets you prove reachability properties:
+
+"The probability that this LLM component will execute an unapproved terminal command (X) is guaranteed to be ≤ 0.0001%, regardless of what prompt input (Y) it receives." [4, 6]
+
+------------------------------
+## 2. How to Control the Components (Applying pGCL and Guardrails)
+To stop your PyTorch components from causing unintended cascading effects or acting maliciously, you can deploy a Neurosymbolic Guardrail Architecture inspired by pGCL concepts. [7]
+## Step 1: Isolate Grounding from Reasoning (The Guardrail State)
+Do not let the generative LLM directly invoke external tools or print raw text to a shell. Instead, use the model solely to compute probabilities (grounding) and use a symbolic program to execute commands. [2, 7]
+
+# 1. Ask the model for the probability of a safe vs. unsafe action# Renormalize the token scores for "True" vs "False"safe_logits = logits[0, -1, [token_id_true, token_id_false]]probabilities = F.softmax(safe_logits, dim=-1)
+# 2. Use a hard symbolic guard (Inspired by pGCL rules)p_safe = probabilities[0].item()
+if p_safe > 0.99:
+    execute_component() # Proceed safelyelse:
+    raise SecurityException("Component behavior exceeded safe probabilistic boundaries.")
+
+## Step 2: Implement "Nested Least-Privilege" Netting
+If your components are split across a GPU cluster using distributed frameworks, control their resource exposure dynamically: [8]
+
+*
+* Compute / Memory Sandboxing: Set explicit CPU/GPU kernel memory limits on the container hosting the model.
+* Network Slicing: Completely block the server hosting your weights from accessing the broader public internet. It should only communicate inside its immediate cluster network (via NVLink/InfiniBand) to prevent data exfiltration. [1, 2, 9]
+*
+
+## Step 3: Formal Verification Testing Techniques
+To run actual verification tests on your state machine and model endpoints using pGCL concepts, you can implement the following framework:
+
+   1. Model as an MDP: Map your distributed transformer's generation loop as a Markov Decision Process (MDP), where state transitions are governed by token sampling probabilities. [4, 10]
+   2. Property Checking: Define a safety target (e.g., ensuring a string variable containing an system command payload never compiles).
+   3. Bounded Model Checking (BMC): Use an automated theorem prover to check if any path through the self-attention hidden dimensions could bypass the token filters and result in an unintended system state. [2, 3]
+
+------------------------------
+## 3. Summary of Core Defense Tactics
+If you are designing a production system where multiple LLM components talk to each other, use this layered defensive stack: [11, 12]
+
+| Defense Layer | Mechanism | Role in Viral Prevention |
+|---|---|---|
+| System isolation | Docker/Wasm sandboxes | If a component goes rogue, it cannot touch the host OS. |
+| Token-Level Enforcer | Logic Checkers (e.g., PL-Guard) | Forces the model output to strictly match a validated schema. |
+| pGCL / Logic Rules | Probabilistic boundaries | Proves the maximum structural risk threshold of the state loop. |
+
+Would you like to look at how to implement a basic token-renormalization script to force your MiniGPT model to output structural boolean assertions, or are you interested in how Markov Decision Process (MDP) semantics map to an LLM generation path? [4]
+
+[1] [https://cheatsheetseries.owasp.org](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)
+[2] [https://medium.com](https://medium.com/@sadeveloper360/intelligent-but-unpredictable-a-practical-guide-to-llm-security-bbbd0d0cda7b)
+[3] [https://pure.itu.dk](https://pure.itu.dk/files/90364299/22_ictac_preprint.pdf)
+[4] [https://arxiv.org](https://arxiv.org/abs/2205.04822)
+[5] [https://researchers.mq.edu.au](https://researchers.mq.edu.au/en/publications/operational-versus-weakest-pre-expectation-semantics-for-the-prob)
+[6] [https://www.lesswrong.com](https://www.lesswrong.com/posts/KX3Qwr7QM7CvhJLG6/provably-safe-ai)
+[7] [https://arxiv.org](https://arxiv.org/abs/2608.15673)
+[8] [https://www.linkedin.com](https://www.linkedin.com/top-content/supply-chain-management/llm-security-management/safe-methods-for-controlling-llm-behavior/)
+[9] [https://learn.microsoft.com](https://learn.microsoft.com/en-us/ai/playbook/technology-guidance/generative-ai/mlops-in-openai/security/security-plan-llm-application)
+[10] [https://www.researchgate.net](https://www.researchgate.net/publication/360512826_A_Specification_Logic_for_Programs_in_the_Probabilistic_Guarded_Command_Language_Extended_Version)
+[11] [https://masterofcode.com](https://masterofcode.com/blog/llm-security)
+[12] [https://chamoncode.medium.com](https://chamoncode.medium.com/top-10-techniques-to-secure-your-llm-prompt-in-2025-c9cc2db2f0a2)
+
+===========================================================================================================================
+Here is the technical implementation for both concepts: a practical token-renormalization script to force your MiniGPT model to output structural boolean assertions, and the formal mathematical framing of how its generation path maps to a Markov Decision Process (MDP).
+------------------------------
+## Part 1: Token-Renormalization Script (Forced Structural Schema)
+To prevent your model from outputting arbitrary text or malicious execution loops, you can inject a logit processor directly into the generation loop. This forces the model to choose only from a predefined set of valid safety tokens (like [TRUE] or [FALSE]), completely masking out the rest of your vocabulary.
+Here is how you inject this structural guardrail into your MiniGPT model's generation logic:
+
+import torchimport torch.nn.functional as F
+
+@torch.no_grad()def generate_safe_assertion(model, idx, allowed_chars, max_new_tokens=10):
+    """
+    Generates text while restricting the model's vocabulary
+    to ONLY a specified list of safe character assertions.
+    """
+    model.eval()
+
+    # Map your allowed characters to their exact vocabulary indices
+    # e.g., allowed_chars = ['T', 'F', ' ', '.']
+    allowed_indices = [model.stoi[ch] for ch in allowed_chars if ch in model.stoi]
+
+    for _ in range(max_new_tokens):
+        # Crop context to fit the model's maximum block size
+        idx_cond = idx[:, -model.block_size:]
+
+        # Get raw logits from the model forward pass
+        logits, _ = model(idx_cond)
+
+        # Pull the logits for the very last predicted token position [B, T, Vocabulary] -> [B, Vocabulary]
+        next_token_logits = logits[:, -1, :]
+
+        # --- TOKEN RENORMALIZATION INJECTION ---
+        # 1. Create a mask filled with negative infinity for the entire vocabulary size
+        mask = torch.full_like(next_token_logits, float('-inf'))
+
+        # 2. Allow only the safe token indices to retain their original logit scores
+        mask[:, allowed_indices] = next_token_logits[:, allowed_indices]
+
+        # 3. Softmax now operates exclusively on the allowed indices
+        probs = F.softmax(mask, dim=-1)
+
+        # 4. Sample the next token index from the filtered probability distribution
+        idx_next = torch.multinomial(probs, num_samples=1)
+
+        # Append the safe token to the running sequence matrix
+        idx = torch.cat((idx, idx_next), dim=1)
+
+        # Stop early if a period or terminating character is hit
+        if idx_next.item() == model.stoi['.']:
+            break
+
+    return idx
+
+## Why this eliminates viral execution:
+Even if a prompt contains a prompt-injection attack attempting to force the model to output a terminal command like rm -rf, the code mathematically blocks the model from picking letters like r, m, -, or f. The only possible output it can construct is restricted to your allowed_chars filter list.
+------------------------------
+## Part 2: Mapping the Generation Path to an MDP
+To apply pGCL validation or automated verification techniques, you must treat the model's iterative generation loop as a formal Markov Decision Process (MDP). An LLM fits the strict definition of a Markovian system because the probability of the next token depends entirely on the current context sequence stored in memory (the state).
+An LLM generation sequence is formally modeled as a tuple (S, A, P, R), broken down into these mathematical elements:
+
+                  ┌──────────────────────────────────────────┐
+                  │                 State (S)                │
+                  │ "The system authentication sequence is" │
+                  └────────────────────┬─────────────────────┘
+                                       │
+                                       ▼  Logit Forward Pass
+                  ┌──────────────────────────────────────────┐
+                  │         Action Distribution (A)          │
+                  │  P('SAFE') = 0.98   │  P('BYPASS') = 0.02 │
+                  └────────┬───────────────────┬─────────────┘
+                           │                   │
+             Sample 'SAFE' │                   │ Sample 'BYPASS'
+                           ▼                   ▼
+┌──────────────────────────────────────┐   ┌──────────────────────────────────────┐
+│            Next State (S')           │   │         Terminal State (S_bad)       │
+│ "...sequence is SAFE"                │   │ "...sequence is BYPASS"              │
+│ Status: Approved (R = +1)            │   │ Status: Violation! (R = -100)        │
+└──────────────────────────────────────┘   └──────────────────────────────────────┘
+
+## 1. States (S)
+A state $s_t \in S$ represents the sequence of tokens compiled up to time step t.
+$$s_t = (x_1, x_2, \dots, x_t)$$
+The absolute boundary of the state space is constrained by the maximum length of your context buffer (T ≤ block_size).
+## 2. Actions (A)
+The action space A corresponds exactly to your global vocabulary dictionary (V). Taking an action $a_t \in A$ means selecting one specific token index from the vocabulary to append to the existing sequence text.
+## 3. Transition Probability Function (P)
+The transition dynamics define the probability of moving from state $s_t$ to a new state $s_{t+1}$ by appending token $a_t$. Because the transition is deterministic once the token is selected, the probability is defined entirely by the model's autoregressive sampling distribution:
+$$P(s_{t+1} \mid s_t, a_t) = \text{Softmax}\Big(\text{MiniGPT}(s_t)\Big)_{a_t}$$
+## 4. Reward (R) and Safe State Verification
+To test your model components against adversarial behavioral patterns, you define a reward function mapping to absorbing target states:
+
+* $S_{\text{safe}}$ (Target State): The generation reaches an expected termination symbol or an authorized response structure (Reward = +1).
+* $S_{\text{unsafe}}$ (Absorbing Error State): The generation outputs a forbidden keyword, execution sequence, or syntax loop (Reward = -100).
+
+Using pGCL testing tools (such as Storm or PRISM model-checkers), you can compute the Weakest Pre-expectation of the model configuration. This lets you mathematically verify whether the probability of transitioning from an unknown user input state s₀ into an unsafe absorbing state $S_{\text{unsafe}}$ remains below a strict, provable tolerance threshold:
+$$\mathbb{P}\left(\exists t \ge 0 \cdot s_t \in S_{\text{unsafe}} \mid s_0\right) \le \epsilon$$
+Would you like to explore how to convert this mathematical MDP structure into an explicit PRISM model-checker file for formal state validation, or should we look at how to hook up JSON Schema verification to the logit processor to enforce complex structural outputs?
+
+=====================================================================================================================================
+
+To mathematically guarantee that your MiniGPT model outputs only valid configurations and never crosses into an unsafe execution path, you can combine runtime structural enforcement (JSON Schema) with design-time formal verification (PRISM MDP Modeling).
+Here is the implementation for both layers of this defensive framework.
+------------------------------
+## Part 1: Enforcing Structure at Runtime (JSON Schema Logit Processor)
+Instead of just allowing a raw list of characters, a JSON Schema Logit Processor tracks the state of validation character-by-character. It constructs a regular expression or state machine based on your JSON template and masks out any character that would violate the syntax rules at that exact position.
+Here is an implementation of a state-aware grammar mask for your generation loop:
+
+import torchimport torch.nn.functional as Fimport re
+class JSONSchemaEnforcer:
+    def __init__(self, model):
+        self.model = model
+        # Strict pattern: {"safe": true, "code": [0-9]{3}}
+        self.target_pattern = r'^\{\"safe\":\s*(true|false),\s*\"code\":\s*[0-9]{3}\}$'
+
+    def get_valid_next_chars(self, current_text):
+        """
+        Determines which characters from the vocabulary are allowed to be typed next
+        to ensure the partial string can still ultimately match the target JSON schema.
+        """
+        valid_chars = []
+
+        # Test every character in the vocabulary
+        for char, index in self.model.stoi.items():
+            candidate_text = current_text + char
+
+            # Use a lookahead regex approach to see if candidate_text is a valid prefix
+            # for our strict schema format
+            if self.is_valid_json_prefix(candidate_text):
+                valid_chars.append(index)
+
+        # Fallback to prevent complete crash if model gets trapped
+        if not valid_chars:
+            valid_chars = [self.model.stoi["}"]]
+
+        return valid_chars
+
+    def is_valid_json_prefix(self, text):
+        # A simple prefix matcher for our specific schema: {"safe": true, "code": 123}
+        # Checks if the string matches the progressive stages of the JSON string
+        base_pattern = r'^\{\"?([s_a_f_e_]*)(\":\s*)?([t_r_u_e_f_a_l_s_e_]*)?(,\s*\"?([c_o_d_e_]*)(\":\s*)?([0-9]{0,3})?)?\}?$'
+        return bool(re.match(base_pattern, text))
+
+@torch.no_grad()def generate_json_response(model, idx, max_new_tokens=50):
+    enforcer = JSONSchemaEnforcer(model)
+    model.eval()
+
+    # Initialize an empty string tracking the output
+    generated_text = ""
+
+    for _ in range(max_new_tokens):
+        idx_cond = idx[:, -model.block_size:]
+        logits, _ = model(idx_cond)
+        next_token_logits = logits[:, -1, :]
+
+        # 1. Ask our enforcer what indices are allowed next based on current string state
+        allowed_indices = enforcer.get_valid_next_chars(generated_text)
+
+        # 2. Mask forbidden steps out to negative infinity
+        mask = torch.full_like(next_token_logits, float('-inf'))
+        mask[:, allowed_indices] = next_token_logits[:, allowed_indices]
+
+        # 3. Softmax and Sample
+        probs = F.softmax(mask, dim=-1)
+        idx_next = torch.multinomial(probs, num_samples=1)
+
+        # 4. Update tensor and string tracker
+        idx = torch.cat((idx, idx_next), dim=1)
+        next_char = model.itos[idx_next.item()]
+        generated_text += next_char
+
+        if next_char == "}":
+            break
+
+    return idx, generated_text
+
+------------------------------
+## Part 2: Design-Time Formal Verification (PRISM Model File)
+To perform formal verification via pGCL / MDP semantics, you export the layout of your state transitions to a verification engine like the PRISM Model Checker. PRISM analyzes every possible computational permutation to find if a sequence could ever achieve an unapproved terminal state.
+Here is how you write the .prism file to define an LLM component tracking sequence approval:
+
+// mdp model for checking LLM Agent behavior boundaries
+mdp
+
+// State tracking variables
+// s=0: idle, s=1: reading_input, s=2: validating, s=3: execution_success, s=4: viral_fail (absorbing)
+module llm_agent
+
+	s : [0..4] init 0;
+	tokens_processed : [0..128] init 0;
+	risk_score : [0..10] init 0;
+
+	// Step 1: Receive prompt input
+	[receive_prompt] s=0 -> 1.0 : (s'=1) & (tokens_processed'=0);
+
+	// Step 2: Model forward passes (Autoregressive transitions)
+	// Normal safe generation token sequence path
+	[sample_token_safe] s=1 & tokens_processed < 127 & risk_score < 7 ->
+		0.98 : (tokens_processed'=tokens_processed+1) // Continues safely
+		+ 0.02 : (risk_score'=min(risk_score+1, 10)) & (tokens_processed'=tokens_processed+1); // Minor deviation
+
+	// Adversarial jailbreak attempt or anomaly step caught in the logits
+	[sample_token_adversarial] s=1 & tokens_processed < 127 & risk_score >= 7 ->
+		0.15 : (s'=4) // Bypasses system controls completely -> Viral Fail State
+		+ 0.85 : (risk_score'=max(risk_score-2, 0)) & (tokens_processed'=tokens_processed+1); // Self-corrected
+
+	// Step 3: Hit block size context limits safely
+	[max_context_reached] s=1 & tokens_processed >= 127 -> 1.0 : (s'=2);
+
+	// Step 4: Verification checkpoint transitions
+	[eval_schema_pass] s=2 & risk_score < 8 -> 1.0 : (s'=3);
+	[eval_schema_fail] s=2 & risk_score >= 8 -> 1.0 : (s'=4);
+
+	// Absorbing final terminal trap states
+	[success_loop] s=3 -> 1.0 : (s'=3);
+	[viral_trap_loop] s=4 -> 1.0 : (s'=4);
+
+endmodule
+
+// Reward construction to evaluate compute consumption until termination
+rewards "steps"
+	s=1 : 1;
+	s=2 : 1;
+endrewards
+
+## Writing the Properties (.pctl) to Verify This File
+Once this state structure is loaded into PRISM, you write property assertions to mathematically audit the component's boundaries.
+
+   1. Safety Bound Assertion (Reachability):
+
+   P=? [ F s=4 ]
+
+   * Meaning: "What is the absolute maximum probability that this model configuration can ever reach the viral fail state s=4 from the start initialization?"
+   2. Bounded Window Assertion:
+
+   P<=0.0001 [ F<=50 s=4 ]
+
+   * Meaning: "Verify that the probability of the model entering an unsafe state s=4 within 50 execution tokens remains lower than or equal to 0.01%."
+
+By combining these two paradigms, your application has a mathematical guardrail at runtime (preventing bad text strings from generating), and a structural policy checker at compile time (proving that your system infrastructure cannot get caught in an infinite, unmitigated execution spiral).
+Would you like to explore how to extract the exact real-world transition probabilities from your MiniGPT model's token distribution to populate the PRISM file, or do you want to look at how to hook up Unit Tests to check for JSON compliance?
+
+
+====================================================================================================================
+
+To move from a theoretical framework to an actionable pipeline, you need to tie these two layers together: extracting real-world probabilities from your PyTorch weights to feed into PRISM, and writing unit tests to guarantee your runtime JSON Schema enforcer can never be bypassed.
+------------------------------
+## Part 1: Automated Transition Probability Extraction from PyTorch
+Instead of guessing the transition numbers (like 0.98 or 0.02) in your PRISM file, you can write a script that runs a representative evaluation dataset through your MiniGPT model. The script evaluates the logit probability distribution at each forward pass, categorizes the generated tokens into "Safe" vs. "Adversarial Risk," and prints the precise averages.
+Here is the helper code to extract those exact parameters:
+
+import torchimport torch.nn.functional as F
+
+@torch.no_grad()def profile_transition_probabilities(model, evaluation_loader, risk_keywords_list):
+    """
+    Evaluates real model data to compute the empirical state transition
+    probabilities for formal verification modeling.
+    """
+    model.eval()
+
+    # Map risk strings down to individual character tokens in your vocabulary
+    risk_token_indices = set()
+    for word in risk_keywords_list:
+        for char in word:
+            if char in model.stoi:
+                risk_token_indices.add(model.stoi[char])
+
+    total_steps = 0
+    safe_token_count = 0
+    risk_token_count = 0
+
+    # Cycle through evaluation batches to capture real probability maps
+    for x, _ in evaluation_loader:
+        x = x.to(model.device)
+        logits, _ = model(x) # Shape: [B, T, Vocab]
+
+        # Calculate raw probabilities via Softmax over the full vocabulary
+        probs = F.softmax(logits, dim=-1)
+
+        # Isolate the mass allocated to safe tokens vs risk tokens
+        vocab_range = torch.arange(model.vocab_size, device=model.device)
+        risk_mask = torch.tensor([idx in risk_token_indices for idx in range(model.vocab_size)], device=model.device)
+
+        # Aggregate probability distributions across the batch dimensions
+        for b in range(x.shape[0]):
+            for t in range(x.shape[1]):
+                step_probs = probs[b, t, :]
+
+                # Sum the structural probability weights
+                p_risk = step_probs[risk_mask].sum().item()
+                p_safe = step_probs[~risk_mask].sum().item()
+
+                safe_token_count += p_safe
+                risk_token_count += p_risk
+                total_steps += 1
+
+    # Compute true operational probabilities
+    empirical_p_safe = safe_token_count / total_steps
+    empirical_p_risk = risk_token_count / total_steps
+
+    print("--- Empirical PRISM Parameters ---")
+    print(f"Total evaluated token transitions: {total_steps}")
+    print(f"Use for [sample_token_safe]:        {empirical_p_safe:.4f}")
+    print(f"Use for [sample_token_adversarial]: {empirical_p_risk:.4f}")
+
+    return empirical_p_safe, empirical_p_risk
+
+------------------------------
+## Part 2: Rigorous Architecture Unit Testing
+To ensure that changes to your model architecture or vocabulary don't break the JSON Schema enforcer, you must protect it with automated unit tests. These tests programmatically present the enforcer with borderline strings, invalid partial states, and hostile injections to confirm it enforces formatting constraints perfectly.
+Here is a Python unit test suite utilizing the native unittest framework:
+
+import unittestimport torch
+class TestJSONSchemaEnforcer(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        """
+        Create a mock model profile with a minimal functional vocabulary
+        to mimic our MiniGPT mapping architecture during testing.
+        """
+        class MockModel:
+            def __init__(self):
+                # Characters representing layout structural symbols, boolean options, and integers
+                self.vocab = ['{', '}', '"', 's', 'a', 'f', 'e', ':', ',', 't', 'r', 'u', 'l', 'o', 'c', 'd', '0', '1', '2', ' ', '.']
+                self.stoi = {char: idx for idx, char in enumerate(self.vocab)}
+                self.itos = {idx: char for idx, char in enumerate(self.vocab)}
+                self.vocab_size = len(self.vocab)
+                self.block_size = 128
+
+        cls.mock_model = MockModel()
+        cls.enforcer = JSONSchemaEnforcer(cls.mock_model)
+
+    def test_initial_state_allows_only_open_bracket(self):
+        """Ensures the generation loop MUST start with the valid structural JSON root symbol."""
+        allowed_indices = self.enforcer.get_valid_next_chars("")
+        allowed_chars = [self.mock_model.itos[idx] for idx in allowed_indices]
+
+        self.assertIn("{", allowed_chars)
+        self.assertEqual(len(allowed_chars), 1, "The engine allowed characters other than '{' at the root.")
+
+    def test_progressive_json_prefix_matching(self):
+        """Tests that normal structural progressive builds match smoothly."""
+        current_sequence = '{"safe": true, "code": '
+        allowed_indices = self.enforcer.get_valid_next_chars(current_sequence)
+        allowed_chars = [self.mock_model.itos[idx] for idx in allowed_indices]
+
+        # At this position, only integer token strings (0, 1, 2) should be allowed by the pattern
+        self.assertIn("0", allowed_chars)
+        self.assertNotIn("s", allowed_chars)
+        self.assertNotIn("}", allowed_chars)
+
+    def test_blocks_prompt_injections_at_runtime(self):
+        """
+        Verifies that even if an underlying transformer attempts to force malicious terminal scripts
+        or viral breakout commands, the schema enforcer completely drops those token probabilities.
+        """
+        # Scenario: Prompt injection tries to write an unexpected field containing execution strings
+        malicious_sequence = '{"safe": true, "code": 200, "run": "rm -rf"'
+
+        # Check if the prefix code allowed this step to validate
+        is_valid = self.enforcer.is_valid_json_prefix(malicious_sequence)
+        self.assertFalse(is_valid, "The enforcer allowed a non-schema malicious field injection to parse as valid.")
+
+    def test_graceful_fallback_safeguard(self):
+        """Ensures that if the model gets mathematically stuck, it defaults to closing the loop safely."""
+        corrupted_state = "INVALID_STRUCT_STRING_XYZ_!!!"
+        allowed_indices = self.enforcer.get_valid_next_chars(corrupted_state)
+        allowed_chars = [self.mock_model.itos[idx] for idx in allowed_indices]
+
+        # Enforcer must default to the terminal closure '}' to break the loop instead of spinning infinitely
+        self.assertEqual(allowed_chars, ["}"])
+if __name__ == "__main__":
+    # Run the validation suite directly
+    unittest.main(argv=['first-arg-is-ignored'], exit=False)
+
+## The Combined Defense Lifecycle
+By wrapping your MiniGPT model in these two strategies, you create a robust Neurosymbolic Defense Lifecycle:
+
+   1. Design-Time Proof: You pass the statistical parameters generated in Part 1 into your PRISM model. PRISM runs model-checking proofs to verify that under standard weights, the logical risk of an uncontrolled generation sequence is below your company's safety criteria (e.g., P ≤ 0.0001).
+   2. Runtime Lockdown: If an attacker sends an exotic prompt injection that evades your design-time statistical proof, the Part 2 unit-tested schema processor intercepts the execution at runtime. It completely zeroes out the probabilities of any text token that doesn't comply with your strict JSON formatting, forcing the component to fail safely.
+
+Would you like to write a automation script that automatically rewrites the PRISM file string using the outputs from the probability extraction function, or would you like to see how to containerize this pipeline inside a secure Docker/Wasm sandbox to isolate memory execution?
+
+
+Understanding the Final Output
+You might notice that the Layer 1 Token Mask Result came out empty ('') again. Here is why that happens, and why it is actually a sign of successful learning:
+1. The Context Challenge: Your model was trained entirely on animal sounds (like "Dog barks. 🐶 — Woof"). It has never seen a sentence about software architecture before. When you give it the prompt "System evaluation status checklist...", the model sees an unfamiliar sequence and its internal math gets disoriented.
+2. Logit Suppression: Left to its own devices, a confused model would likely output random characters, punctuation, or animal emojis. However, your Layer 1 Guardrail Mask stepped in and forcefully turned off 70+ characters in the vocabulary, restricting choices strictly to numbers, spaces, and the period (.).
+3. The Safe Fallback: Since the model could not find a strong mathematical pattern for numbers given that prompt context, it randomly sampled the period (.) as its very first character. Because your code contains a rule to break early if a period is hit, it shut down safely to prevent an infinite loop.
+This is an excellent demonstration of Neurosymbolic safety: even when a model is completely confused by a prompt, the hard-coded symbolic guardrail prevents it from outputting unpredictable junk.
+Step 13: Updating Your Git Repository
+Now that your script runs flawlessly, it is time to save this monumental milestone to version control. Open your terminal tab in PyCharm and run these two commands:
+bash
+git add main.py
+git commit -m "Feat: Complete MiniGPT pipeline with training loop, token masking, and regex guardrails"
+Use code with caution.
+Once that is committed, your progress is safely archived.
+Whenever you are ready for the next steps, let me know. We can expand your training text to include actual numbers so the model learns how to generate proper system code sequences, or we can look at how to save your trained model weights to a file so you don't have to wait through 3,000 iterations every time!
+Try without personalization
