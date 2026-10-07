@@ -23,34 +23,48 @@ The architecture builds upward in a nested structure: Head → MultiHeadAttentio
 The model cannot read characters directly. It maps them to vectors.
 
 * token_embedding: Maps each distinct text character (e.g., 'D', 'o', 'g') to a dense, continuous list of 128 numbers (n_embd = 128).
-* position_embedding: Text order matters ("Dog barks" vs "barks Dog"). This layer tracks the index position (0 to 127) of each character in the sequence and adds a positional vector directly to the token vector.
+* position_embedding: Text order matters ("Dog barks" vs "barks Dog"). This layer tracks the index position (0 to 127)
+of each character in the sequence and adds a positional vector directly to the token vector.
 
 ## 2. Scaled Causal Self-Attention (Head)
-This is the pattern matcher. It answers the question: Which previous characters in this sentence are most relevant to predicting the current character?
+This is the pattern matcher. It answers the question: Which previous characters in this sentence are most relevant to
+predicting the current character?
 
 * Queries, Keys, and Values (Q, K, V):
 * Query (Q): What am I looking for?
    * Key (K): What information do I contain?
    * Value (V): If I am a match, what information do I pass along?
-* Causal Masking (tril): A lower-triangular matrix filled with zeros and ones. It zeroes out future tokens by setting their attention scores to -inf before the softmax phase. This guarantees that when processing the word "Dog", the model is mathematically blocked from looking ahead at "barks".
+* Causal Masking (tril): A lower-triangular matrix filled with zeros and ones. It zeroes out future tokens by setting
+their attention scores to -inf before the softmax phase. This guarantees that when processing the word "Dog",
+the model is mathematically blocked from looking ahead at "barks".
 
 ## 3. Multi-Head Attention (MultiHeadAttention)
-Instead of performing self-attention once, the model runs 4 individual attention Head instances simultaneously in parallel. One head might focus on matching vowels, another on punctuation patterns, and another on spacing. Their outputs are glued together (torch.cat) and mixed using a linear projection layer.
+Instead of performing self-attention once, the model runs 4 individual attention Head instances simultaneously
+in parallel. One head might focus on matching vowels, another on punctuation patterns, and another on spacing.
+Their outputs are glued together (torch.cat) and mixed using a linear projection layer.
 ## 4. Feed-Forward Network (FeedForward)
-After attention gathers information from surrounding characters, the feed-forward network lets the model process that data contextually. It expands the 128-dimension data to a wider 512-dimension space (4 * n_embd), applies a non-linear switch (GELU), and compresses it back down to 128.
+After attention gathers information from surrounding characters, the feed-forward network lets the model process that
+data contextually. It expands the 128-dimension data to a wider 512-dimension space (4 * n_embd), applies a non-linear
+ switch (GELU), and compresses it back down to 128.
+
 ## 5. Residual Connections & LayerNorm (Block)
 Notice the syntax: x = x + self.attention(self.ln1(x)).
-Adding the original input x back to the output creates a residual connection. This acts as an information highway, allowing gradients to flow backward during training without degrading, while LayerNorm stabilizes the variance of values across the network layers.
+Adding the original input x back to the output creates a residual connection.
+This acts as an information highway, allowing gradients to flow backward during training without degrading,
+while LayerNorm stabilizes the variance of values across the network layers.
 ------------------------------
 ## Part 2: Step-by-Step Data Flow Steps
 Here is exactly what happens when data passes through your script during a training operation.
 ## Step 1: Tokenization and Slicing
-The raw string data is parsed into a clean list of unique characters (vocab_size). The encoder maps every single unique symbol to an integer index.
+The raw string data is parsed into a clean list of unique characters (vocab_size). The encoder maps every single
+unique symbol to an integer index.
 
 Text:   "D  o  g     b  a  r  k  s  ."
 Vector: [13, 26, 18, 1, 15, 12, 29, 22, 30, 2]
 
-The data loader function get_batch randomly snatches 32 rows (batch_size) of characters, chopped to a maximum length of 128 context items (block_size).
+The data loader function get_batch randomly snatches 32 rows (batch_size) of characters,
+chopped to a maximum length of 128 context items (block_size).
+
 ## Step 2: Shifting Targets for Prediction
 The batch generator returns two matrix layouts:
 
@@ -58,15 +72,22 @@ The batch generator returns two matrix layouts:
 * y (Targets): The same window shifted forward by exactly one position: [o, g, ]
 
 This explicitly sets up the learning structure: Given input D, predict target o. Given inputs D, o, predict target g.
+
 ## Step 3: Layer Processing
-Inside forward(idx), your batch indices map to embedding spaces, integrate positional vectors, and iterate sequentially through the 4 stacked Block components.
+Inside forward(idx), your batch indices map to embedding spaces, integrate positional vectors, and iterate
+sequentially through the 4 stacked Block components.
+
 ## Step 4: Map to Vocabulary Logits
-The final sequence array reaches the language modeling head lm_head. It projects the internal 128 embedding dimensions out to match your exact total vocabulary size (e.g., 65 distinct characters). These raw scores are called logits.
+The final sequence array reaches the language modeling head lm_head. It projects the internal 128
+embedding dimensions out to match your exact total vocabulary size (e.g., 65 distinct characters).
+These raw scores are called logits.
+
 ## Step 5: Optimization (Loss Calculation)
 The model compares its raw vocabulary logits against the true target characters y using Cross-Entropy Loss.
 
 * If the true next letter is o, and the model gave the letter o a low probability score, the loss spikes high.
-* During optimization, PyTorch computes gradients across this loss and updates all internal Linear weight matrices to slowly adjust the probabilities closer to reality.
+* During optimization, PyTorch computes gradients across this loss and updates all internal Linear weight
+ matrices to slowly adjust the probabilities closer to reality.
 
 ## Step 6: Autoregressive Generation (generate)
 When producing text, it runs in an iterative generation loop:
@@ -74,46 +95,65 @@ When producing text, it runs in an iterative generation loop:
    1. It takes a starter prompt.
    2. It processes the text forward through the network layers to calculate vocabulary logits.
    3. It looks only at the prediction matrix outputted at the very last character position.
-   4. It computes a Softmax probability curve over those scores, selects a single next character index, and welds it onto the end of the input text tracker.
+   4. It computes a Softmax probability curve over those scores, selects a single next character index,
+   and welds it onto the end of the input text tracker.
    5. The script loops back around, feeding the expanded text back into step 1 to calculate the next character.
 
-Would you like me to show you the exact matrix shapes (like [B, T, C]) as they change line-by-line through the self-attention calculation, or would you prefer to see how to add a temperature-based sampling step into the generation loop?
+Would you like me to show you the exact matrix shapes (like [B, T, C]) as they change line-by-line
+through the self-attention calculation, or would you prefer to see how to add a temperature-based sampling
+step into the generation loop?
 
 -------===========================================================================================
 
-To scale a model from your local computer to a data center, you cannot just use a bigger GPU. A single modern GPU has, at most, 80GB to 141GB of High Bandwidth Memory (HBM).
-A frontier model with hundreds of billions of parameters requires terabytes of memory just to hold the weights, plus hundreds of gigabytes more to hold the active user sessions (the KV Cache).
-To solve this, data centers inject distributed frameworks that chop up the model and the workload across thousands of nodes. Here is exactly where that distributed help is injected and how the results are assimilated.
+To scale a model from your local computer to a data center, you cannot just use a bigger GPU. A single modern GPU has,
+at most, 80GB to 141GB of High Bandwidth Memory (HBM).
+A frontier model with hundreds of billions of parameters requires terabytes of memory just to hold the weights,
+ hundreds of gigabytes more to hold the active user sessions (the KV Cache).
+To solve this, data centers inject distributed frameworks that chop up the model and the workload across thousands
+of nodes. Here is exactly where that distributed help is injected and how the results are assimilated.
 ------------------------------
 ## 1. Where Distributed Help is Injected
-Distributed help is injected directly into the matrix multiplications and layer loops you see in your PyTorch code. The industry uses three primary types of distributed parallelisms simultaneously (collectively called 3D Parallelism):
+Distributed help is injected directly into the matrix multiplications and layer loops you see in your PyTorch code.
+The industry uses three primary types of distributed parallelisms simultaneously (collectively called 3D Parallelism):
+
 ## Tensor Parallelism (Splitting a Single Layer)
 
 * Where it's injected: Inside the Head, MultiHeadAttention, and FeedForward layers.
-* How it works: Instead of one GPU processing a whole layer, a single weight matrix is sliced vertically or horizontally across a group of GPUs (usually 8 GPUs inside a single server box).
-* When processing Linear(n_embd, 4 * n_embd), GPU 0 handles the first 25% of the matrix multiplication, GPU 1 handles the second 25%, and so on.
+* How it works: Instead of one GPU processing a whole layer, a single weight matrix is sliced vertically or
+horizontally across a group of GPUs (usually 8 GPUs inside a single server box).
+* When processing Linear(n_embd, 4 * n_embd), GPU 0 handles the first 25% of the matrix multiplication,
+GPU 1 handles the second 25%, and so on.
 
 ## Pipeline Parallelism (Splitting Layer-by-Layer)
 
 * Where it's injected: Inside the self.blocks = nn.Sequential(...) loop.
-* How it works: If a model has 80 Transformer blocks, it is sliced horizontally. GPUs 0-3 handle blocks 1-20, GPUs 4-7 handle blocks 21-40, and so on across different physical server racks. The data travels through the network like an assembly line.
+* How it works: If a model has 80 Transformer blocks, it is sliced horizontally. GPUs 0-3 handle blocks 1-20,
+GPUs 4-7 handle blocks 21-40, and so on across different physical server racks.
+The data travels through the network like an assembly line.
 
 ## Data Parallelism (Splitting the User Load)
 
 * Where it's injected: At the batch_size level in get_batch().
-* How it works: The data center receives thousands of user prompts at the same time. The infrastructure duplicates the entire model across multiple independent clusters. Cluster A processes your prompt, while Cluster B processes someone else's prompt concurrently.
+* How it works: The data center receives thousands of user prompts at the same time.
+ The infrastructure duplicates the entire model across multiple independent clusters.
+  Cluster A processes your prompt, while Cluster B processes someone else's prompt concurrently.
 
 ------------------------------
 ## 2. How the Results are Assimilated (Gathering the Math)
-When a matrix multiplication or a transformer layer is broken apart across a network of GPUs, the shards must constantly talk to each other to rebuild the correct mathematical answer.
-This assimilation relies on low-level primitive communication algorithms built into frameworks like PyTorch Distributed (NCCL).
+When a matrix multiplication or a transformer layer is broken apart across a network of GPUs, the shards must
+constantly talk to each other to rebuild the correct mathematical answer.
+This assimilation relies on low-level primitive communication algorithms built into frameworks like
+PyTorch Distributed (NCCL).
+
 ## The "All-Reduce" Step (Recombining Split Matrices)
-In your code's MultiHeadAttention, you concatenate the heads: torch.cat([h(x) for h in self.heads], dim=-1). In a distributed cluster, those heads are physically sitting on different GPUs.
+In your code's MultiHeadAttention, you concatenate the heads: torch.cat([h(x) for h in self.heads], dim=-1).
+In a distributed cluster, those heads are physically sitting on different GPUs.
 To assimilate them, a collective communication step called All-Reduce is injected:
 
    1. Each GPU calculates its local matrix multiplication piece.
    2. The GPUs use an ultra-fast hardware interconnect (like NVIDIA NVLink or Intel Xe Link) to pass their results in a ring.
-   3. Every GPU sums up the values from all other GPUs. By the end of the operation, every single GPU in the cluster possesses the identical, fully assimilated multi-head tensor, completely in sync.
+   3. Every GPU sums up the values from all other GPUs. By the end of the operation, every single GPU in the cluster
+   possesses the identical, fully assimilated multi-head tensor, completely in sync.
 
 [GPU 0: Head 1] ──┐
 [GPU 1: Head 2] ──┼─> [ NVLink / InfiniBand Network ] ─> [ All-Reduce Sum ] ─> Sync'd Vector Ready for Next Layer
@@ -121,36 +161,56 @@ To assimilate them, a collective communication step called All-Reduce is injecte
 [GPU 3: Head 4] ──┘
 
 ## The Pipeline Hand-off
-For layers split across servers via Pipeline Parallelism, assimilation is a simple relay race. When GPU group 1 finishes processing Block 20, it sends the resulting tensor across an InfiniBand cable (a specialized data center network with speeds up to 400-800 Gbps) directly into the memory of GPU group 2, which is waiting to process Block 21.
+For layers split across servers via Pipeline Parallelism, assimilation is a simple relay race.
+ When GPU group 1 finishes processing Block 20, it sends the resulting tensor across an InfiniBand cable
+ (a specialized data center network with speeds up to 400-800 Gbps) directly into the memory of GPU group 2,
+ which is waiting to process Block 21.
 ------------------------------
+
 ## 3. The Grand Assimilation: Token Aggregation
 Once the data passes through all the split layers and reaches the very end of the network, it hits the final lm_head.
 
    1. The final layer's output (logits) is consolidated onto a single master node via an All-Gather primitive.
-   2. This master node runs the sampling calculation (Softmax + Temperature) to choose the one winning token ID (e.g., Token 4023, which maps to the text "Moo").
-   3. The cluster immediately flushes the intermediate activations of that step out of its main memory, updates its KV Cache matrices with the new token information, and outputs that single token back to your browser client.
+   2. This master node runs the sampling calculation (Softmax + Temperature) to choose the one winning token ID
+   (e.g., Token 4023, which maps to the text "Moo").
+   3. The cluster immediately flushes the intermediate activations of that step out of its main memory,
+    updates its KV Cache matrices with the new token information, and outputs that single token back to your browser client.
 
-To anchor this to your PyTorch code, would you like to see how Tensor Parallelism mathematically splits the FeedForward layer's Linear matrices across two columns, or would you prefer to explore the hardware specs of how NVLink and InfiniBand prevent communication bottlenecks?
+To anchor this to your PyTorch code, would you like to see how Tensor Parallelism mathematically splits the
+FeedForward layer's Linear matrices across two columns, or would you prefer to explore the hardware specs of
+how NVLink and InfiniBand prevent communication bottlenecks?
 
 ========================================================================================================
 
-When you refer to an LLM component becoming a "virus," you are highlighting a core challenge in AI Safety: preventing uncontrolled execution loops, data exfiltration, and unexpected compliance with malicious instructions. Because LLMs process text probabilistically, a bad prompt or malformed input can cause the model to behave unpredictably or act as an autonomous agent that manipulates external systems. [1, 2]
-To mathematically enforce boundaries on an LLM, researchers turn to Formal Verification methods like pGCL (Probabilistic Guarded Command Language). [3]
+When you refer to an LLM component becoming a "virus," you are highlighting a core challenge in AI Safety: preventing
+uncontrolled execution loops, data exfiltration, and unexpected compliance with malicious instructions.
+Because LLMs process text probabilistically, a bad prompt or malformed input can cause the model to behave
+unpredictably or act as an autonomous agent that manipulates external systems. [1, 2]
+To mathematically enforce boundaries on an LLM, researchers turn to Formal Verification methods like
+pGCL (Probabilistic Guarded Command Language). [3]
 ------------------------------
 ## 1. What is pGCL and How Does it Apply to AI Safety?
-Traditional programming languages use hard logic (e.g., if x > 5 then A else B). Dijkstra’s Guarded Command Language introduced non-determinism (e.g., pick any action whose guard condition is true).
-pGCL (developed by McIver and Morgan) expands this by adding probabilistic choice. It allows computer scientists to write programs that look like this: [3, 4]
+Traditional programming languages use hard logic (e.g., if x > 5 then A else B). Dijkstra’s Guarded Command Language
+introduced non-determinism (e.g., pick any action whose guard condition is true).
+pGCL (developed by McIver and Morgan) expands this by adding probabilistic choice.
+It allows computer scientists to write programs that look like this: [3, 4]
 $$\text{If Guard is True} \rightarrow \text{Execute Action A with probability } p, \text{ or Action B with probability } (1-p)$$
-In the context of LLMs, the model's vocabulary logits are translated into probabilistic choices within a state machine. By modeling an LLM agent as a pGCL program, you can use Weakest Pre-expectation Semantics or Probabilistic Dynamic Logic (pDL) to mathematically prove its safety boundaries. [3, 4, 5]
+
+In the context of LLMs, the model's vocabulary logits are translated into probabilistic choices within a state machine.
+ By modeling an LLM agent as a pGCL program, you can use Weakest Pre-expectation Semantics or
+ Probabilistic Dynamic Logic (pDL) to mathematically prove its safety boundaries. [3, 4, 5]
 Instead of just testing the model with a few prompts, pGCL testing lets you prove reachability properties:
 
-"The probability that this LLM component will execute an unapproved terminal command (X) is guaranteed to be ≤ 0.0001%, regardless of what prompt input (Y) it receives." [4, 6]
+"The probability that this LLM component will execute an unapproved terminal command (X) is guaranteed to be ≤ 0.0001%,
+ regardless of what prompt input (Y) it receives." [4, 6]
 
 ------------------------------
 ## 2. How to Control the Components (Applying pGCL and Guardrails)
-To stop your PyTorch components from causing unintended cascading effects or acting maliciously, you can deploy a Neurosymbolic Guardrail Architecture inspired by pGCL concepts. [7]
+To stop your PyTorch components from causing unintended cascading effects or acting maliciously,
+you can deploy a Neurosymbolic Guardrail Architecture inspired by pGCL concepts. [7]
 ## Step 1: Isolate Grounding from Reasoning (The Guardrail State)
-Do not let the generative LLM directly invoke external tools or print raw text to a shell. Instead, use the model solely to compute probabilities (grounding) and use a symbolic program to execute commands. [2, 7]
+Do not let the generative LLM directly invoke external tools or print raw text to a shell.
+Instead, use the model solely to compute probabilities (grounding) and use a symbolic program to execute commands. [2, 7]
 
 # 1. Ask the model for the probability of a safe vs. unsafe action# Renormalize the token scores for "True" vs "False"safe_logits = logits[0, -1, [token_id_true, token_id_false]]probabilities = F.softmax(safe_logits, dim=-1)
 # 2. Use a hard symbolic guard (Inspired by pGCL rules)p_safe = probabilities[0].item()
