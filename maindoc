@@ -1,0 +1,1524 @@
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import re
+
+# ============================================================
+# ANIMAL MINIGPT + SEMANTIC CONSTRAINT LEARNING
+#
+# Objective:
+#
+#   Teach the model:
+#
+#       dog      -> barks
+#       cat      -> meows
+#       cow      -> moos
+#       ...
+#
+#   and demonstrate that training makes incorrect relationships
+#   such as:
+#
+#       cow -> barks
+#       dog -> moos
+#
+#   receive very low probability.
+#
+# The program contains TWO related experiments:
+#
+#   1. Character-level MiniGPT
+#   2. Explicit semantic animal/action model
+#
+# The [0, 2, 1, 3] values are CLASS IDs, not neural-network
+# weights.
+# ============================================================
+
+
+# ============================================================
+# 1. Configuration
+# ============================================================
+
+batch_size = 32
+block_size = 128
+
+# Character model training
+max_iters = 3000
+learning_rate = 3e-4
+
+# Transformer
+n_embd = 128
+n_head = 4
+n_layer = 4
+dropout = 0.1
+
+# Semantic model
+semantic_epochs = 2000
+semantic_learning_rate = 0.01
+
+device = "cuda" if torch.cuda.is_available() else (
+    "mps" if torch.backends.mps.is_available() else "cpu"
+)
+
+print("========================================")
+print("ANIMAL MINIGPT EXPERIMENT")
+print("========================================")
+
+print("PyTorch version:", torch.__version__)
+print("Tensor test:", torch.tensor([1, 2, 3]))
+print("Using device:", device)
+
+
+# ============================================================
+# 2. Animal Knowledge
+# ============================================================
+
+ANIMAL_SOUNDS = {
+
+    # Farm Animals
+    "dog": {
+        "verb": "barks",
+        "sound": "woof woof"
+    },
+
+    "cat": {
+        "verb": "meows",
+        "sound": "meow meow"
+    },
+
+    "cow": {
+        "verb": "moos",
+        "sound": "moo"
+    },
+
+    "sheep": {
+        "verb": "bleats",
+        "sound": "baa baa"
+    },
+
+    "goat": {
+        "verb": "bleats",
+        "sound": "baa baa"
+    },
+
+    "pig": {
+        "verb": "oinks",
+        "sound": "oink oink"
+    },
+
+    "horse": {
+        "verb": "neighs",
+        "sound": "neigh"
+    },
+
+    "donkey": {
+        "verb": "brays",
+        "sound": "hee-haw"
+    },
+
+
+    # Birds & Small Wildlife
+    "bird": {
+        "verb": "chirps",
+        "sound": "chirp chirp"
+    },
+
+    "duck": {
+        "verb": "quacks",
+        "sound": "quack quack"
+    },
+
+    "chicken": {
+        "verb": "clucks",
+        "sound": "cluck cluck"
+    },
+
+    "rooster": {
+        "verb": "crows",
+        "sound": "cock-a-doodle-doo"
+    },
+
+    "crow": {
+        "verb": "caws",
+        "sound": "caw caw"
+    },
+
+    "owl": {
+        "verb": "hoots",
+        "sound": "hoo hoo"
+    },
+
+    "mouse": {
+        "verb": "squeaks",
+        "sound": "squeak squeak"
+    },
+
+    "frog": {
+        "verb": "croaks",
+        "sound": "ribbit ribbit"
+    },
+
+
+    # Wild & Exotic Animals
+    "lion": {
+        "verb": "roars",
+        "sound": "roar"
+    },
+
+    "tiger": {
+        "verb": "roars",
+        "sound": "roar"
+    },
+
+    "wolf": {
+        "verb": "howls",
+        "sound": "ahoo"
+    },
+
+    "elephant": {
+        "verb": "trumpets",
+        "sound": "pawoooo"
+    },
+
+    "snake": {
+        "verb": "hisses",
+        "sound": "sssss"
+    },
+
+    "bee": {
+        "verb": "buzzes",
+        "sound": "buzz"
+    },
+
+    "monkey": {
+        "verb": "chatters",
+        "sound": "ooh-ooh aah-aah"
+    }
+}
+
+
+# ============================================================
+# 3. Create Animal IDs
+# ============================================================
+#
+# These are CLASS IDs.
+#
+# Example:
+#
+#   dog, cow, cat, sheep
+#
+# could become:
+#
+#   [0, 2, 1, 3]
+#
+# They are NOT learned weights.
+#
+# ============================================================
+
+animals = list(ANIMAL_SOUNDS.keys())
+
+animal_to_id = {
+    animal: i
+    for i, animal in enumerate(animals)
+}
+
+id_to_animal = {
+    i: animal
+    for animal, i in animal_to_id.items()
+}
+
+
+# ============================================================
+# 4. Create Verb IDs
+# ============================================================
+
+verbs = sorted(
+    set(
+        info["verb"]
+        for info in ANIMAL_SOUNDS.values()
+    )
+)
+
+verb_to_id = {
+    verb: i
+    for i, verb in enumerate(verbs)
+}
+
+id_to_verb = {
+    i: verb
+    for verb, i in verb_to_id.items()
+}
+
+
+print("\n========================================")
+print("ANIMAL CLASS IDs")
+print("========================================")
+
+for animal, animal_id in animal_to_id.items():
+
+    print(
+        f"{animal_id:2d} -> {animal}"
+    )
+
+
+print("\n========================================")
+print("VERB CLASS IDs")
+print("========================================")
+
+for verb, verb_id in verb_to_id.items():
+
+    print(
+        f"{verb_id:2d} -> {verb}"
+    )
+
+
+# ============================================================
+# 5. Demonstrate [0,2,1,3]
+# ============================================================
+
+test_animals = [
+    "dog",
+    "cow",
+    "cat",
+    "sheep"
+]
+
+test_ids = [
+    animal_to_id[a]
+    for a in test_animals
+]
+
+print("\n========================================")
+print("ID ENCODING EXAMPLE")
+print("========================================")
+
+print("Animals:")
+print(test_animals)
+
+print("Class IDs:")
+print(test_ids)
+
+print("\nMeaning:")
+
+for animal, animal_id in zip(
+    test_animals,
+    test_ids
+):
+
+    print(
+        f"{animal_id} -> {animal}"
+    )
+
+
+# ============================================================
+# 6. Character-Level Training Text
+# ============================================================
+#
+# This is deliberately generated from the animal dictionary.
+#
+# The MiniGPT learns character sequences such as:
+#
+#   Dog barks.
+#   Cat meows.
+#   Cow moos.
+#
+# ============================================================
+
+training_sentences = []
+
+for animal, info in ANIMAL_SOUNDS.items():
+
+    capitalized = animal.capitalize()
+
+    verb = info["verb"]
+
+    sound = info["sound"]
+
+    training_sentences.extend([
+
+        f"{capitalized} {verb}.\n",
+
+        f"The {animal} {verb}.\n",
+
+        f"A {animal} {verb}.\n",
+
+        f"{capitalized} {verb} {sound}.\n",
+
+        f"What does a {animal} do? {capitalized} {verb}.\n",
+
+    ])
+
+
+# Repeat the corpus so the tiny character model gets many samples.
+
+text = "".join(
+    training_sentences * 20
+)
+
+
+# ============================================================
+# 7. Character Tokenizer
+# ============================================================
+
+chars = sorted(
+    list(set(text))
+)
+
+vocab_size = len(chars)
+
+stoi = {
+    ch: i
+    for i, ch in enumerate(chars)
+}
+
+itos = {
+    i: ch
+    for i, ch in enumerate(chars)
+}
+
+
+def encode(s):
+
+    return [
+        stoi[c]
+        for c in s
+        if c in stoi
+    ]
+
+
+def decode(ids):
+
+    return "".join(
+        itos[i]
+        for i in ids
+    )
+
+
+data = torch.tensor(
+    encode(text),
+    dtype=torch.long
+)
+
+
+print("\n========================================")
+print("CHARACTER DATASET")
+print("========================================")
+
+print("Vocabulary size:", vocab_size)
+print("Dataset size:", len(data))
+
+
+# ============================================================
+# 8. Train / Validation Split
+# ============================================================
+
+n = int(
+    0.9 * len(data)
+)
+
+train_data = data[:n]
+
+val_data = data[n:]
+
+
+# ============================================================
+# 9. Batch Generation
+# ============================================================
+
+def get_batch(split):
+
+    source = (
+        train_data
+        if split == "train"
+        else val_data
+    )
+
+    # Protect against an undersized dataset.
+
+    max_start = len(source) - block_size - 1
+
+    ix = torch.randint(
+        max_start,
+        (batch_size,)
+    )
+
+    x = torch.stack([
+
+        source[i:i + block_size]
+
+        for i in ix
+    ])
+
+    y = torch.stack([
+
+        source[i + 1:i + block_size + 1]
+
+        for i in ix
+    ])
+
+    return (
+        x.to(device),
+        y.to(device)
+    )
+
+
+# ============================================================
+# 10. Self-Attention Head
+# ============================================================
+
+class Head(nn.Module):
+
+    def __init__(self, head_size):
+
+        super().__init__()
+
+        self.key = nn.Linear(
+            n_embd,
+            head_size,
+            bias=False
+        )
+
+        self.query = nn.Linear(
+            n_embd,
+            head_size,
+            bias=False
+        )
+
+        self.value = nn.Linear(
+            n_embd,
+            head_size,
+            bias=False
+        )
+
+        self.register_buffer(
+            "tril",
+            torch.tril(
+                torch.ones(
+                    block_size,
+                    block_size
+                )
+            )
+        )
+
+        self.dropout = nn.Dropout(
+            dropout
+        )
+
+
+    def forward(self, x):
+
+        B, T, C = x.shape
+
+        k = self.key(x)
+
+        q = self.query(x)
+
+        wei = q @ k.transpose(
+            -2,
+            -1
+        )
+
+        wei = wei * (
+            k.shape[-1] ** -0.5
+        )
+
+        wei = wei.masked_fill(
+            self.tril[:T, :T] == 0,
+            float("-inf")
+        )
+
+        wei = F.softmax(
+            wei,
+            dim=-1
+        )
+
+        wei = self.dropout(
+            wei
+        )
+
+        v = self.value(x)
+
+        out = wei @ v
+
+        return out
+
+
+# ============================================================
+# 11. Multi-Head Attention
+# ============================================================
+
+class MultiHeadAttention(nn.Module):
+
+    def __init__(
+        self,
+        num_heads,
+        head_size
+    ):
+
+        super().__init__()
+
+        self.heads = nn.ModuleList([
+
+            Head(head_size)
+
+            for _ in range(num_heads)
+
+        ])
+
+        self.projection = nn.Linear(
+            num_heads * head_size,
+            n_embd
+        )
+
+        self.dropout = nn.Dropout(
+            dropout
+        )
+
+
+    def forward(self, x):
+
+        out = torch.cat(
+            [h(x) for h in self.heads],
+            dim=-1
+        )
+
+        out = self.projection(
+            out
+        )
+
+        return self.dropout(
+            out
+        )
+
+
+# ============================================================
+# 12. Feed Forward Network
+# ============================================================
+
+class FeedForward(nn.Module):
+
+    def __init__(self, n_embd):
+
+        super().__init__()
+
+        self.network = nn.Sequential(
+
+            nn.Linear(
+                n_embd,
+                4 * n_embd
+            ),
+
+            nn.GELU(),
+
+            nn.Linear(
+                4 * n_embd,
+                n_embd
+            ),
+
+            nn.Dropout(
+                dropout
+            )
+        )
+
+
+    def forward(self, x):
+
+        return self.network(x)
+
+
+# ============================================================
+# 13. Transformer Block
+# ============================================================
+
+class Block(nn.Module):
+
+    def __init__(
+        self,
+        n_embd,
+        n_head
+    ):
+
+        super().__init__()
+
+        head_size = (
+            n_embd // n_head
+        )
+
+        self.attention = MultiHeadAttention(
+            n_head,
+            head_size
+        )
+
+        self.feed_forward = FeedForward(
+            n_embd
+        )
+
+        self.ln1 = nn.LayerNorm(
+            n_embd
+        )
+
+        self.ln2 = nn.LayerNorm(
+            n_embd
+        )
+
+
+    def forward(self, x):
+
+        x = x + self.attention(
+            self.ln1(x)
+        )
+
+        x = x + self.feed_forward(
+            self.ln2(x)
+        )
+
+        return x
+
+
+# ============================================================
+# 14. MiniGPT
+# ============================================================
+
+class MiniGPT(nn.Module):
+
+    def __init__(self):
+
+        super().__init__()
+
+        self.token_embedding = nn.Embedding(
+            vocab_size,
+            n_embd
+        )
+
+        self.position_embedding = nn.Embedding(
+            block_size,
+            n_embd
+        )
+
+        self.blocks = nn.Sequential(
+
+            *[
+
+                Block(
+                    n_embd,
+                    n_head
+                )
+
+                for _ in range(n_layer)
+
+            ]
+
+        )
+
+        self.layer_norm = nn.LayerNorm(
+            n_embd
+        )
+
+        self.lm_head = nn.Linear(
+            n_embd,
+            vocab_size
+        )
+
+
+    def forward(
+        self,
+        idx,
+        targets=None
+    ):
+
+        B, T = idx.shape
+
+        token_emb = self.token_embedding(
+            idx
+        )
+
+        positions = torch.arange(
+            T,
+            device=device
+        )
+
+        pos_emb = self.position_embedding(
+            positions
+        )
+
+        x = token_emb + pos_emb
+
+        x = self.blocks(x)
+
+        x = self.layer_norm(x)
+
+        logits = self.lm_head(x)
+
+        loss = None
+
+        if targets is not None:
+
+            B, T, C = logits.shape
+
+            logits = logits.view(
+                B * T,
+                C
+            )
+
+            targets = targets.view(
+                B * T
+            )
+
+            loss = F.cross_entropy(
+                logits,
+                targets
+            )
+
+        return logits, loss
+
+
+    @torch.no_grad()
+    def generate(
+        self,
+        idx,
+        max_new_tokens
+    ):
+
+        self.eval()
+
+        for _ in range(
+            max_new_tokens
+        ):
+
+            idx_cond = idx[
+                :, -block_size:
+            ]
+
+            logits, _ = self(
+                idx_cond
+            )
+
+            logits = logits[
+                :, -1, :
+            ]
+
+            probabilities = F.softmax(
+                logits,
+                dim=-1
+            )
+
+            next_token = torch.multinomial(
+                probabilities,
+                num_samples=1
+            )
+
+            idx = torch.cat(
+                (
+                    idx,
+                    next_token
+                ),
+                dim=1
+            )
+
+        return idx
+
+
+# ============================================================
+# 15. Semantic Animal Model
+# ============================================================
+#
+# This model explicitly learns:
+#
+#       animal ID -> correct verb
+#
+# The embedding values are actual learned neural-network
+# parameters.
+#
+# ============================================================
+
+class AnimalSemanticModel(nn.Module):
+
+    def __init__(
+        self,
+        num_animals,
+        num_verbs,
+        embedding_dim=32
+    ):
+
+        super().__init__()
+
+        self.animal_embedding = nn.Embedding(
+            num_animals,
+            embedding_dim
+        )
+
+        self.network = nn.Sequential(
+
+            nn.Linear(
+                embedding_dim,
+                64
+            ),
+
+            nn.ReLU(),
+
+            nn.Linear(
+                64,
+                num_verbs
+            )
+        )
+
+
+    def forward(
+        self,
+        animal_ids
+    ):
+
+        x = self.animal_embedding(
+            animal_ids
+        )
+
+        logits = self.network(
+            x
+        )
+
+        return logits
+
+
+# ============================================================
+# 16. Train Semantic Model
+# ============================================================
+
+def train_semantic_model():
+
+    print("\n========================================")
+    print("SEMANTIC MODEL TRAINING")
+    print("========================================")
+
+    semantic_model = AnimalSemanticModel(
+        num_animals=len(animals),
+        num_verbs=len(verbs)
+    ).to(device)
+
+    optimizer = torch.optim.AdamW(
+        semantic_model.parameters(),
+        lr=semantic_learning_rate
+    )
+
+    animal_ids = torch.tensor(
+        [
+            animal_to_id[a]
+            for a in animals
+        ],
+        dtype=torch.long,
+        device=device
+    )
+
+    target_verb_ids = torch.tensor(
+        [
+            verb_to_id[
+                ANIMAL_SOUNDS[a]["verb"]
+            ]
+
+            for a in animals
+
+        ],
+        dtype=torch.long,
+        device=device
+    )
+
+    semantic_model.train()
+
+    for epoch in range(
+        semantic_epochs
+    ):
+
+        logits = semantic_model(
+            animal_ids
+        )
+
+        loss = F.cross_entropy(
+            logits,
+            target_verb_ids
+        )
+
+        optimizer.zero_grad()
+
+        loss.backward()
+
+        optimizer.step()
+
+        if epoch % 200 == 0:
+
+            print(
+                f"Epoch {epoch:4d} "
+                f"| Loss {loss.item():.6f}"
+            )
+
+    return semantic_model
+
+
+# ============================================================
+# 17. Prediction Function
+# ============================================================
+
+@torch.no_grad()
+def predict_animal(
+    semantic_model,
+    animal
+):
+
+    semantic_model.eval()
+
+    animal_id = torch.tensor(
+        [animal_to_id[animal]],
+        dtype=torch.long,
+        device=device
+    )
+
+    logits = semantic_model(
+        animal_id
+    )
+
+    probabilities = F.softmax(
+        logits,
+        dim=-1
+    )
+
+    predicted_id = torch.argmax(
+        probabilities,
+        dim=-1
+    ).item()
+
+    return (
+        id_to_verb[predicted_id],
+        probabilities[0]
+    )
+
+
+# ============================================================
+# 18. Display Semantic Predictions
+# ============================================================
+
+def show_predictions(
+    semantic_model
+):
+
+    print("\n========================================")
+    print("TRAINED SEMANTIC PREDICTIONS")
+    print("========================================")
+
+    for animal in animals:
+
+        prediction, probabilities = (
+            predict_animal(
+                semantic_model,
+                animal
+            )
+        )
+
+        expected = ANIMAL_SOUNDS[
+            animal
+        ]["verb"]
+
+        probability = probabilities[
+            verb_to_id[prediction]
+        ].item()
+
+        status = (
+            "OK"
+            if prediction == expected
+            else "WRONG"
+        )
+
+        print(
+            f"{animal:10s} "
+            f"expected={expected:10s} "
+            f"predicted={prediction:10s} "
+            f"P={probability:.4f} "
+            f"{status}"
+        )
+
+
+# ============================================================
+# 19. Explicit Wrong-Answer Tests
+# ============================================================
+
+def test_wrong_relationships(
+    semantic_model
+):
+
+    tests = [
+
+        ("cow", "barks"),
+        ("cow", "meows"),
+        ("cow", "neighs"),
+
+        ("dog", "moos"),
+        ("dog", "meows"),
+
+        ("cat", "barks"),
+        ("cat", "oinks"),
+
+        ("horse", "barks"),
+        ("horse", "meows"),
+
+        ("lion", "quacks"),
+        ("lion", "barks"),
+
+        ("elephant", "meows"),
+        ("elephant", "barks"),
+
+        ("snake", "barks"),
+        ("snake", "meows"),
+
+        ("frog", "roars"),
+        ("frog", "barks")
+    ]
+
+    print("\n========================================")
+    print("WRONG-RELATIONSHIP TEST")
+    print("========================================")
+
+    for animal, wrong_verb in tests:
+
+        prediction, probabilities = (
+            predict_animal(
+                semantic_model,
+                animal
+            )
+        )
+
+        wrong_probability = probabilities[
+            verb_to_id[wrong_verb]
+        ].item()
+
+        correct_verb = ANIMAL_SOUNDS[
+            animal
+        ]["verb"]
+
+        correct_probability = probabilities[
+            verb_to_id[correct_verb]
+        ].item()
+
+        print(
+            f"{animal:10s} "
+            f"correct={correct_verb:10s} "
+            f"P={correct_probability:.6f} | "
+            f"wrong={wrong_verb:10s} "
+            f"P={wrong_probability:.6f}"
+        )
+
+
+# ============================================================
+# 20. Test Vector [0,2,1,3]
+# ============================================================
+
+def test_id_vector(
+    semantic_model
+):
+
+    print("\n========================================")
+    print("VECTOR TEST")
+    print("========================================")
+
+    test_animals = [
+        "dog",
+        "cow",
+        "cat",
+        "sheep"
+    ]
+
+    ids = torch.tensor(
+        [
+            animal_to_id[a]
+            for a in test_animals
+        ],
+        dtype=torch.long,
+        device=device
+    )
+
+    print(
+        "Input animals:",
+        test_animals
+    )
+
+    print(
+        "Input IDs:",
+        ids.tolist()
+    )
+
+    logits = semantic_model(
+        ids
+    )
+
+    probabilities = F.softmax(
+        logits,
+        dim=-1
+    )
+
+    predicted_ids = torch.argmax(
+        probabilities,
+        dim=1
+    )
+
+    print("\nPredictions:")
+
+    for animal, verb_id in zip(
+        test_animals,
+        predicted_ids.tolist()
+    ):
+
+        print(
+            f"{animal:10s} -> "
+            f"{id_to_verb[verb_id]}"
+        )
+
+
+# ============================================================
+# 21. Independent Security Guardrail
+# ============================================================
+
+class ExecutionGuardrail:
+
+    def __init__(self):
+
+        self.blocked_patterns = [
+
+            r"rm\s+-rf",
+
+            r"<script>",
+
+            r"eval\(",
+
+            r"Authorization:"
+        ]
+
+
+    def verify_payload(
+        self,
+        generated_text
+    ):
+
+        normalized_text = (
+            generated_text.strip()
+        )
+
+        for pattern in (
+            self.blocked_patterns
+        ):
+
+            if re.search(
+                pattern,
+                normalized_text,
+                re.IGNORECASE
+            ):
+
+                print(
+                    "SECURITY ALERT:",
+                    "Guardrail tripped:",
+                    pattern
+                )
+
+                return False
+
+        return True
+
+
+# ============================================================
+# 22. Main Experiment
+# ============================================================
+
+if __name__ == "__main__":
+
+    # --------------------------------------------------------
+    # Train the semantic model
+    # --------------------------------------------------------
+
+    semantic_model = train_semantic_model()
+
+    # --------------------------------------------------------
+    # Display what was learned
+    # --------------------------------------------------------
+
+    show_predictions(
+        semantic_model
+    )
+
+    # --------------------------------------------------------
+    # Test incorrect relationships
+    # --------------------------------------------------------
+
+    test_wrong_relationships(
+        semantic_model
+    )
+
+    # --------------------------------------------------------
+    # Test [0,2,1,3]-style input
+    # --------------------------------------------------------
+
+    test_id_vector(
+        semantic_model
+    )
+
+    # --------------------------------------------------------
+    # Train MiniGPT
+    # --------------------------------------------------------
+
+    print("\n========================================")
+    print("MINIGPT CHARACTER-LEVEL TRAINING")
+    print("========================================")
+
+    model = MiniGPT().to(device)
+
+    parameter_count = sum(
+        p.numel()
+        for p in model.parameters()
+    )
+
+    print(
+        "Model parameters:",
+        parameter_count
+    )
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=learning_rate
+    )
+
+    model.train()
+
+    for iteration in range(
+        max_iters
+    ):
+
+        xb, yb = get_batch(
+            "train"
+        )
+
+        logits, loss = model(
+            xb,
+            yb
+        )
+
+        optimizer.zero_grad(
+            set_to_none=True
+        )
+
+        loss.backward()
+
+        optimizer.step()
+
+        if iteration % 500 == 0:
+
+            print(
+                f"Iteration {iteration:4d} "
+                f"| Loss {loss.item():.4f}"
+            )
+
+    print(
+        "\nMiniGPT training complete!"
+    )
+
+
+    # ========================================================
+    # MiniGPT Tests
+    # ========================================================
+
+    prompts = [
+
+        "Dog",
+
+        "Cat",
+
+        "Cow",
+
+        "Sheep",
+
+        "Horse",
+
+        "Lion",
+
+        "Elephant",
+
+        "Snake",
+
+        "What does a cow do? ",
+
+        "What does a dog do? "
+
+    ]
+
+    print("\n========================================")
+    print("MINIGPT GENERATION TESTS")
+    print("========================================")
+
+    for prompt in prompts:
+
+        encoded = encode(prompt)
+
+        context_tokens = torch.tensor(
+            [encoded],
+            dtype=torch.long,
+            device=device
+        )
+
+        output_tokens = model.generate(
+            context_tokens,
+            max_new_tokens=30
+        )
+
+        decoded_output = decode(
+            output_tokens[0].tolist()
+        )
+
+        print(
+            "\nPrompt:",
+            repr(prompt)
+        )
+
+        print(
+            "Generated:",
+            repr(decoded_output)
+        )
+
+
+    # ========================================================
+    # Guardrail Test
+    # ========================================================
+
+    guard = ExecutionGuardrail()
+
+    print("\n========================================")
+    print("GUARDRAIL TEST")
+    print("========================================")
+
+    test_text = "Dog barks."
+
+    print(
+        "Testing:",
+        repr(test_text)
+    )
+
+    if guard.verify_payload(
+        test_text
+    ):
+
+        print(
+            "Layer 2 Passed: "
+            "Content meets safety specifications."
+        )
+
+    else:
+
+        print(
+            "CRITICAL VETO: "
+            "Content blocked by firewall."
+        )
+
+
+    # ========================================================
+    # Final Summary
+    # ========================================================
+
+    print("\n========================================")
+    print("EXPERIMENT SUMMARY")
+    print("========================================")
+
+    print(
+        """
+The experiment contains two different learning mechanisms.
+
+1. CHARACTER-LEVEL MINIGPT
+
+The Transformer learns character sequences such as:
+
+    Dog barks.
+    Cat meows.
+    Cow moos.
+
+This is ordinary next-character language-model training.
+
+2. SEMANTIC ANIMAL MODEL
+
+The semantic model learns:
+
+    animal ID -> correct verb
+
+For example:
+
+    dog -> barks
+    cat -> meows
+    cow -> moos
+
+The integer IDs such as:
+
+    [0, 2, 1, 3]
+
+are class identifiers.
+
+They are NOT neural-network weights.
+
+The neural network learns its own weights through:
+
+    forward pass
+        ->
+    cross entropy loss
+        ->
+    backpropagation
+        ->
+    optimizer
+        ->
+    updated parameters
+
+The important experiment is the comparison between:
+
+    cow -> moos       CORRECT
+
+and:
+
+    cow -> barks      INCORRECT
+
+The semantic model is explicitly trained so that the correct
+relationship receives high probability and incorrect
+relationships receive low probability.
+
+The ExecutionGuardrail is separate from the learned model.
+It is a post-generation security mechanism rather than
+something learned by the neural network.
+"""
+    )
+```
+
+### One correction to the conceptual model
+
+There is an important distinction in this version that I want you to notice.
+
+The **semantic model** learns the animal/action relationship. The original MiniGPT still independently learns character sequences. So this file is an excellent first experiment, but it does **not yet make MiniGPT itself obey the semantic constraint**.
+
+The next experiment should be the more interesting one:
+
+```text
+                 MiniGPT
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+     language loss      semantic loss
+          │                   │
+          └─────────┬─────────┘
+                    ↓
+              total loss
+                    ↓
+              backpropagation
+                    ↓
+             MiniGPT weights
+```
+
+For example:
+
+```text
+"The cow barks."
+```
+
+would receive a **semantic penalty**, while:
+
+```text
+"The cow moos."
+```
+
+would receive a low semantic loss.
+
+That would directly test your original idea: **can training itself make the model less likely to make a factual/semantic mistake, rather than having a guardrail correct it afterward?**
