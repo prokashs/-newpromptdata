@@ -1,0 +1,5082 @@
+Of course. That is actually a good way to proceed.
+
+Since the animals project was assembled from sample code, we can **slow down and understand it from first principles**, rather than treating it as a finished black box.
+
+When you're ready, ask anything—even very basic questions. We can go through things such as:
+
+* Why we need `torch`
+* What a **tensor** really is
+* What `nn.Module` does
+* What the **weights** are
+* What `[0, 2, 1, 3]` represented
+Yes. Let's take these **four fundamentals slowly**, using the animals project as the running example.
+
+The key idea is:
+
+> **PyTorch is a system for representing numbers, organizing computations on those numbers, and automatically calculating how the model's parameters should change during learning.**
+
+---
+
+# 1. Why do we need `torch`?
+
+Suppose we want our program to learn:
+
+```text
+dog  → bark
+cat  → meow
+cow  → moo
+horse → neigh
+```
+
+A normal Python program can certainly store this:
+
+```python
+animals = {
+    "dog": "bark",
+    "cat": "meow",
+    "cow": "moo",
+    "horse": "neigh"
+}
+```
+
+But this is **not learning**.
+
+It's simply a lookup table.
+
+For a neural network, we need to perform enormous numbers of mathematical operations:
+
+$$
+y = Wx+b
+$$
+
+and repeatedly calculate:
+
+$$
+\frac{\partial L}{\partial W}
+$$
+
+That means we need:
+
+1. efficient numerical arrays
+2. matrix multiplication
+3. neural-network layers
+4. automatic differentiation
+5. optimization
+6. GPU support when available
+
+That's what PyTorch provides.
+
+So:
+
+```python
+import torch
+```
+
+gives us the fundamental numerical machinery.
+
+For example:
+
+```python
+x = torch.tensor([2.0, 3.0])
+w = torch.tensor([4.0, 5.0])
+
+y = x * w
+```
+
+produces:
+
+```text
+[8.0, 15.0]
+```
+
+But the really important feature is that PyTorch can **remember the mathematical operations** and calculate derivatives.
+
+---
+
+# 2. What is a tensor?
+
+A tensor is, fundamentally, a **container of numbers arranged in one or more dimensions**.
+
+You can think of it as a generalization of a scalar, vector, and matrix.
+
+### Scalar
+
+One number:
+
+```python
+x = torch.tensor(5.0)
+```
+
+Shape:
+
+```text
+()
+```
+
+Mathematically:
+
+$$
+x=5
+$$
+
+---
+
+### Vector
+
+Several numbers:
+
+```python
+x = torch.tensor([5.0, 7.0, 2.0])
+```
+
+Shape:
+
+```text
+(3,)
+```
+
+Mathematically:
+
+$$
+x =
+\begin{bmatrix}
+5\\
+7\\
+2
+\end{bmatrix}
+$$
+
+---
+
+### Matrix
+
+```python
+x = torch.tensor([
+    [1.0, 2.0],
+    [3.0, 4.0]
+])
+```
+
+Shape:
+
+```text
+(2, 2)
+```
+
+Mathematically:
+
+$$
+X=
+\begin{bmatrix}
+1&2\\
+3&4
+\end{bmatrix}
+$$
+
+---
+
+### Three-dimensional tensor
+
+For example:
+
+```text
+2 × 3 × 4
+```
+
+That's 24 numbers arranged in three dimensions.
+
+This becomes extremely important in neural networks because data frequently has several dimensions.
+
+For example, a language model might have:
+
+```text
+batch × sequence × embedding
+```
+
+such as:
+
+```text
+4 × 20 × 128
+```
+
+meaning:
+
+* 4 examples
+* 20 tokens per example
+* 128 numbers representing each token
+
+So when you see:
+
+```python
+x.shape
+```
+
+you're really asking:
+
+> **How are the numbers organized?**
+
+---
+
+# 3. What does `nn.Module` do?
+
+This is one of the most important PyTorch concepts.
+
+`nn.Module` is the basic building block for defining a **neural-network model or component**.
+
+For example:
+
+```python
+import torch
+import torch.nn as nn
+
+class MyModel(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        self.linear = nn.Linear(3, 2)
+
+    def forward(self, x):
+        return self.linear(x)
+```
+
+We have created a model containing a linear layer.
+
+Conceptually:
+
+```text
+input
+  │
+  ▼
+┌─────────────┐
+│ Linear      │
+│ 3 → 2       │
+└─────────────┘
+  │
+  ▼
+output
+```
+
+Why inherit from `nn.Module`?
+
+Because PyTorch then knows that this object is a neural-network component and can automatically manage things such as:
+
+* trainable parameters
+* nested layers
+* parameter discovery
+* saving/loading model state
+* switching between training/evaluation modes
+* moving parameters to CPU/GPU
+
+For example:
+
+```python
+model.parameters()
+```
+
+gives PyTorch access to the parameters that need to be learned.
+
+That's enormously useful.
+
+---
+
+# 4. What are the weights?
+
+This is where **learning** really happens.
+
+Consider:
+
+$$
+y=wx
+$$
+
+Suppose:
+
+```text
+x = 2
+w = 3
+```
+
+Then:
+
+$$
+y=3(2)=6
+$$
+
+Here `w` is a **weight**.
+
+Initially, the neural network doesn't know what `w` should be.
+
+It might start with:
+
+```text
+w = 0.73
+```
+
+Then it makes a prediction.
+
+The training process asks:
+
+> How wrong was that prediction?
+
+That produces a **loss**.
+
+Then PyTorch calculates:
+
+$$
+\frac{\partial L}{\partial w}
+$$
+
+which tells us:
+
+> If I change `w` slightly, which direction makes the error smaller?
+
+The optimizer then changes `w`.
+
+So the basic learning cycle is:
+
+```text
+             weights
+                │
+                ▼
+input ──────► neural network
+                │
+                ▼
+            prediction
+                │
+                ▼
+               loss
+                │
+                ▼
+          backpropagation
+                │
+                ▼
+             gradients
+                │
+                ▼
+            optimizer
+                │
+                ▼
+          new weights
+```
+
+And this repeats many times.
+
+---
+
+## In a real neural network there aren't just a few weights
+
+Suppose we have:
+
+```python
+nn.Linear(10, 5)
+```
+
+There are 10 inputs and 5 outputs.
+
+The weight matrix has:
+
+$$
+5\times10=50
+$$
+
+weights.
+
+Plus 5 bias values.
+
+So that one tiny layer already has:
+
+$$
+55
+$$
+
+trainable parameters.
+
+A Transformer can have **millions or billions** of parameters.
+
+Those parameters—not the animal IDs—are what the neural network actually learns.
+
+---
+
+# 5. So what was `[0, 2, 1, 3]`?
+
+This is an important distinction from our earlier discussion.
+
+In our animals experiment, we assigned **integer IDs** to categories.
+
+Something like:
+
+```text
+animal       ID
+----------------
+dog           0
+cat           1
+cow           2
+horse         3
+```
+
+So:
+
+```python
+[0, 2, 1, 3]
+```
+
+could represent:
+
+```text
+dog → cow → cat → horse
+```
+
+depending on the particular mapping we created.
+
+The crucial point is:
+
+> **Those numbers are identifiers, not learned weights.**
+
+They are simply labels used to represent categories using integers.
+
+---
+
+# 6. Why not use the words directly?
+
+A neural network works with numbers.
+
+It cannot directly multiply:
+
+```text
+"cow" × 0.73
+```
+
+So we convert:
+
+```text
+"cow"
+   ↓
+integer ID
+   ↓
+2
+```
+
+Then, in a neural language model, that integer typically goes into an **embedding layer**:
+
+```text
+"cow"
+  │
+  ▼
+ID = 2
+  │
+  ▼
+Embedding lookup
+  │
+  ▼
+[0.21, -0.73, 0.44, 0.18, ...]
+```
+
+That vector **is learned**.
+
+This is where things get interesting.
+
+The number:
+
+```text
+2
+```
+
+is just an identifier.
+
+The embedding:
+
+```text
+[0.21, -0.73, 0.44, ...]
+```
+
+contains learned parameters.
+
+---
+
+# 7. The distinction I want you to remember
+
+There are three very different things:
+
+| Thing                  | Example            | Learned? |
+| ---------------------- | ------------------ | -------- |
+| Animal name            | `"cow"`            | No       |
+| Integer ID             | `2`                | No       |
+| Neural-network weights | `0.21, -0.73, ...` | **Yes**  |
+
+And in our project:
+
+```text
+             "cow"
+                │
+                ▼
+              ID 2
+                │
+                ▼
+        ┌──────────────┐
+        │   Embedding  │
+        └──────────────┘
+                │
+                ▼
+       learned vector
+                │
+                ▼
+          Transformer
+                │
+                ▼
+           prediction
+```
+
+That is the beginning of understanding what your PyTorch program is actually doing.
+
+### And one particularly important point
+
+The fact that we used:
+
+```text
+dog = 0
+cat = 1
+cow = 2
+horse = 3
+```
+
+does **not** mean the model knows that:
+
+$$
+cow > cat
+$$
+
+or that:
+
+$$
+horse = 3
+$$
+
+has any mathematical meaning.
+
+The IDs are just **addresses into a table**.
+
+That's exactly why the next fundamental concept I would teach you is **the embedding layer**. Once you understand embeddings, the transition from our simple animal dictionary to the MiniGPT Transformer becomes much clearer.
+-----------------------------------------------------------
+* How the animal/verb data becomes numbers
+* What an **embedding** does
+* What the Transformer is actually computing
+* What **loss** means
+
+Yes. These four pieces form the **core pipeline** of what we built. Let's use a very small example so you can see the numbers rather than treating the Transformer as magic.
+
+---
+
+# 1. How does animal/verb data become numbers?
+
+Our original information is symbolic:
+
+```text
+dog   → bark
+cat   → meow
+cow   → moo
+horse → neigh
+```
+
+A neural network cannot directly calculate with `"dog"` or `"bark"`.
+
+So we create a **vocabulary**.
+
+For example:
+
+```text
+animal vocabulary:
+
+dog   = 0
+cat   = 1
+cow   = 2
+horse = 3
+```
+
+and perhaps:
+
+```text
+verb vocabulary:
+
+bark  = 0
+meow  = 1
+moo   = 2
+neigh = 3
+```
+
+So:
+
+```text
+"cow moos"
+```
+
+becomes:
+
+```text
+[2, 2]
+```
+
+if `cow = 2` and `moo = 2`.
+
+But there's an important complication in our **MiniGPT** project.
+
+We used a **character-level tokenizer**.
+
+So instead of treating `"cow"` as one token, the tokenizer might treat it as:
+
+```text
+c o w   m o o s .
+```
+
+Each character gets an integer ID:
+
+```text
+c → 12
+o → 17
+w → 23
+  →  4
+m → 15
+...
+```
+
+Therefore:
+
+```text
+"cow moos."
+```
+
+might become something like:
+
+```text
+[12, 17, 23, 4, 15, 17, 17, 18, 2]
+```
+
+The exact numbers depend on the vocabulary generated by our program.
+
+### Why do this?
+
+Because now the neural network receives something like:
+
+```text
+[12, 17, 23, 4, 15, 17, 17, 18, 2]
+```
+
+instead of:
+
+```text
+"cow moos."
+```
+
+But these integers **still aren't meaningful numerical representations**.
+
+That's where embeddings come in.
+
+---
+
+# 2. What does an embedding do?
+
+Imagine we have 30 possible characters.
+
+We create an embedding table:
+
+```text
+30 characters × 8 dimensions
+```
+
+Conceptually:
+
+```text
+             embedding vector
+             ↓
+c → [ 0.21, -0.73,  0.14,  0.81, ...]
+o → [-0.42,  0.18,  0.55, -0.31, ...]
+w → [ 0.67,  0.22, -0.41,  0.09, ...]
+```
+
+The important thing:
+
+> **The embedding vectors are learned parameters.**
+
+The integer `12` for `"c"` isn't learned.
+
+It is just an index.
+
+The embedding row associated with `12` **is learned**.
+
+---
+
+## Think of an embedding as a dictionary
+
+Suppose:
+
+```text
+embedding table E
+```
+
+is:
+
+$$
+E =
+\begin{bmatrix}
+0.2 & 0.7 & -0.1\\
+0.4 & -0.3 & 0.8\\
+...
+\end{bmatrix}
+$$
+
+If `"cow"` has ID 7, the model effectively performs:
+
+$$
+E[7]
+$$
+
+and obtains:
+
+$$
+[0.31,-0.72,0.44]
+$$
+
+That vector becomes the numerical representation given to the Transformer.
+
+---
+
+# 3. Why is this useful?
+
+Because the model can learn relationships between representations.
+
+For example, after training, we might find that representations associated with related things become useful for predicting one another.
+
+But **don't interpret individual embedding coordinates directly**.
+
+For example:
+
+```text
+cow = [0.31, -0.72, 0.44]
+```
+
+doesn't mean:
+
+```text
+0.31 = mammal
+-0.72 = has four legs
+0.44 = makes moo sound
+```
+
+Usually the information is **distributed across many dimensions**.
+
+That's a very important concept in neural networks.
+
+---
+
+# 4. Now the Transformer
+
+Suppose our input is:
+
+```text
+cow moos
+```
+
+After tokenization and embedding, we might have:
+
+```text
+c → vector
+o → vector
+w → vector
+  → vector
+m → vector
+o → vector
+o → vector
+s → vector
+```
+
+Conceptually:
+
+```text
+tokens
+  ↓
+embedding
+  ↓
+vectors
+  ↓
+Transformer
+```
+
+The Transformer then repeatedly transforms those vectors.
+
+The central operation is **self-attention**.
+
+---
+
+# 5. What is self-attention actually doing?
+
+This sounds complicated, but the basic question is surprisingly simple:
+
+> **For this token, which other tokens should I pay attention to?**
+
+Suppose the sequence is:
+
+```text
+The cow moos
+```
+
+When processing `"moos"`, the model needs information about `"cow"`.
+
+Self-attention allows the model to calculate something like:
+
+```text
+"moos"
+   │
+   ├── attention to "The"   → low
+   ├── attention to "cow"   → high
+   └── attention to "moos"  → ...
+```
+
+It doesn't use symbolic rules such as:
+
+```text
+if animal == cow:
+    verb = moo
+```
+
+Instead, it calculates numerical relationships.
+
+---
+
+# 6. Q, K and V
+
+This is the heart of Transformer attention.
+
+For every input vector \(x\), the Transformer calculates:
+
+$$
+Q=xW_Q
+$$
+
+$$
+K=xW_K
+$$
+
+$$
+V=xW_V
+$$
+
+where:
+
+* \(Q\) = Query
+* \(K\) = Key
+* \(V\) = Value
+
+And importantly:
+
+$$
+W_Q,\ W_K,\ W_V
+$$
+
+are **learned weights**.
+
+Then attention scores are approximately:
+
+$$
+score(Q,K)=\frac{QK^T}{\sqrt{d}}
+$$
+
+The scores are converted into probabilities using softmax:
+
+$$
+A=\operatorname{softmax}
+\left(
+\frac{QK^T}{\sqrt d}
+\right)
+$$
+
+Then:
+
+$$
+output=AV
+$$
+
+So the Transformer is essentially learning:
+
+> **Which representations should interact, and by how much?**
+
+---
+
+# 7. A simplified example
+
+Suppose the model is processing:
+
+```text
+The cow moos
+```
+
+and the attention mechanism produces:
+
+```text
+              The     cow     moos
+moos          0.05    0.80    0.15
+```
+
+This means the representation being computed for `"moos"` uses approximately:
+
+```text
+5%   information from "The"
+80%  information from "cow"
+15%  information from "moos"
+```
+
+This is **not a hard-coded rule**.
+
+The weights came from learned parameters and the current input.
+
+That is the key idea behind attention.
+
+---
+
+# 8. Then what is the Transformer trying to predict?
+
+In our MiniGPT-style language model, the fundamental task is:
+
+> Given the previous characters/tokens, predict the next one.
+
+For example:
+
+```text
+Input:
+"The cow"
+
+Target:
+" "
+```
+
+Then:
+
+```text
+Input:
+"The cow "
+
+Target:
+"m"
+```
+
+Then:
+
+```text
+Input:
+"The cow m"
+
+Target:
+"o"
+```
+
+Then:
+
+```text
+"The cow mo"
+
+→ "o"
+```
+
+Then:
+
+```text
+"The cow moo"
+
+→ "s"
+```
+
+So the model is fundamentally doing:
+
+$$
+P(\text{next token}\mid\text{previous tokens})
+$$
+
+---
+
+# 9. What does LOSS mean?
+
+This is probably the most important concept after weights.
+
+Suppose the correct next character is:
+
+```text
+s
+```
+
+The model produces probabilities:
+
+```text
+a   0.01
+b   0.02
+c   0.03
+...
+s   0.70
+...
+z   0.01
+```
+
+The model is saying:
+
+> "I think `s` has a 70% probability."
+
+That's pretty good.
+
+Now suppose instead it produces:
+
+```text
+a   0.30
+b   0.20
+...
+s   0.02
+...
+```
+
+That's bad.
+
+**Loss measures how bad the prediction is.**
+
+---
+
+# 10. Cross-entropy loss
+
+For a single correct class, the simplified cross-entropy loss is:
+
+$$
+L=-\log(p_{\text{correct}})
+$$
+
+Suppose:
+
+$$
+p_{\text{correct}}=0.9
+$$
+
+Then:
+
+$$
+L=-\log(0.9)\approx0.105
+$$
+
+Small loss.
+
+If:
+
+$$
+p_{\text{correct}}=0.1
+$$
+
+then:
+
+$$
+L=-\log(0.1)\approx2.303
+$$
+
+Much larger loss.
+
+If the model assigns almost zero probability to the correct answer, the loss becomes very large.
+
+So:
+
+```text
+good prediction
+      ↓
+high probability for correct answer
+      ↓
+small loss
+```
+
+and:
+
+```text
+bad prediction
+      ↓
+low probability for correct answer
+      ↓
+large loss
+```
+
+---
+
+# 11. Where learning happens
+
+Now we can connect everything.
+
+```text
+"cow moos"
+     │
+     ▼
+tokenizer
+     │
+     ▼
+integer IDs
+     │
+     ▼
+embedding
+     │
+     ▼
+vectors
+     │
+     ▼
+Transformer
+     │
+     ▼
+probabilities
+     │
+     ▼
+prediction
+     │
+     ▼
+compare with correct answer
+     │
+     ▼
+LOSS
+     │
+     ▼
+backpropagation
+     │
+     ▼
+gradients
+     │
+     ▼
+update weights
+```
+
+And then we repeat this **many, many times**.
+
+---
+
+# 12. The most important distinction
+
+You now have four different levels:
+
+### Level 1 — Symbolic data
+
+```text
+cow → moo
+```
+
+### Level 2 — IDs
+
+```text
+cow → 2
+moo → 7
+```
+
+These are merely identifiers.
+
+### Level 3 — Embeddings
+
+```text
+cow → [0.31, -0.72, 0.44, ...]
+```
+
+These are learned numerical representations.
+
+### Level 4 — Transformer computation
+
+The Transformer combines those representations through learned transformations and attention to produce:
+
+```text
+probability distribution over possible next tokens
+```
+
+Then:
+
+```text
+prediction
+   ↓
+loss
+   ↓
+gradient
+   ↓
+weight update
+```
+
+And **that is learning**.
+
+---
+
+## One subtle point about our animal experiment
+
+Our original experiment had **two somewhat different learning tasks**:
+
+```text
+                 ┌── MiniGPT
+animal text ─────┤
+                 │
+                 └── semantic classifier
+```
+
+The MiniGPT learned **language patterns**.
+
+The semantic classifier learned **animal → verb relationships**.
+
+Then our external `AnimalGuardrail` explicitly enforced:
+
+```text
+cow → moo
+```
+
+and blocked:
+
+```text
+cow → bark
+```
+
+So when we eventually modify the MiniGPT to include:
+
+$$
+L_{\text{total}}
+=
+L_{\text{language}}
++
+\lambda L_{\text{semantic}}
+$$
+
+we'll be doing something considerably more interesting: **the semantic requirement itself will influence the Transformer weights through backpropagation**.
+
+That is the natural next step after we understand **backpropagation and gradients**.
+
+============================================================
+* How `loss.backward()` computes gradients
+* How the optimizer changes the weights
+* What the semantic classifier was learning
+
+Absolutely. These three are where the pieces finally come together. I'll use a **tiny numerical example first**, then connect it directly to your animal project.
+
+---
+
+# 1. What does `loss.backward()` actually do?
+
+Suppose we have the simplest possible model:
+
+$$
+y = wx
+$$
+
+Let:
+
+```text
+x = 2
+w = 3
+```
+
+Therefore:
+
+$$
+y = 3\times2=6
+$$
+
+Suppose the correct answer should have been:
+
+```text
+target = 10
+```
+
+We need a measure of error. Let's use squared error:
+
+$$
+L=(y-target)^2
+$$
+
+Therefore:
+
+$$
+L=(6-10)^2=16
+$$
+
+So our situation is:
+
+```text
+x = 2
+w = 3
+     ↓
+y = 6
+     ↓
+target = 10
+     ↓
+loss = 16
+```
+
+The question is:
+
+> **How should we change `w` to make the loss smaller?**
+
+---
+
+# 2. The gradient answers that question
+
+We want:
+
+$$
+\frac{\partial L}{\partial w}
+$$
+
+Using the chain rule:
+
+$$
+L=(y-10)^2
+$$
+
+and:
+
+$$
+y=wx
+$$
+
+Therefore:
+
+$$
+\frac{\partial L}{\partial w}
+=
+\frac{\partial L}{\partial y}
+\frac{\partial y}{\partial w}
+$$
+
+First:
+
+$$
+\frac{\partial L}{\partial y}
+=
+2(y-10)
+$$
+
+Since \(y=6\):
+
+$$
+2(6-10)=-8
+$$
+
+And:
+
+$$
+\frac{\partial y}{\partial w}=x=2
+$$
+
+Therefore:
+
+$$
+\frac{\partial L}{\partial w}
+=
+-8\times2
+=
+-16
+$$
+
+So the gradient is:
+
+$$
+\boxed{-16}
+$$
+
+The negative sign is important.
+
+It tells us that **increasing `w` would decrease the loss**.
+
+---
+
+# 3. Now PyTorch does this for us
+
+The code can be:
+
+```python
+import torch
+
+x = torch.tensor(2.0)
+
+w = torch.tensor(3.0, requires_grad=True)
+
+target = torch.tensor(10.0)
+
+y = w * x
+
+loss = (y - target) ** 2
+
+loss.backward()
+
+print("y =", y.item())
+print("loss =", loss.item())
+print("gradient =", w.grad.item())
+```
+
+You should get approximately:
+
+```text
+y = 6.0
+loss = 16.0
+gradient = -16.0
+```
+
+The remarkable line is:
+
+```python
+loss.backward()
+```
+
+PyTorch has traced the computation:
+
+```text
+w
+│
+├── multiply by x
+│
+▼
+y
+│
+├── subtract target
+│
+▼
+error
+│
+├── square
+│
+▼
+loss
+```
+
+and then applies the **chain rule backwards**:
+
+```text
+loss
+ ↑
+ │ dL/dy
+ │
+y
+ ↑
+ │ dy/dw
+ │
+w
+```
+
+That's why it's called **backpropagation**.
+
+---
+
+# 4. `backward()` does NOT change the weights
+
+This is a very important distinction.
+
+After:
+
+```python
+loss.backward()
+```
+
+we have:
+
+```text
+w = 3
+w.grad = -16
+```
+
+The weight is still **3**.
+
+`backward()` calculated the gradient.
+
+It did **not** update the parameter.
+
+That's the optimizer's job.
+
+---
+
+# 5. How does the optimizer change the weight?
+
+The simplest optimization rule is **gradient descent**:
+
+$$
+w_{\text{new}}
+=
+w_{\text{old}}
+-
+\eta
+\frac{\partial L}{\partial w}
+$$
+
+where \(\eta\) is the learning rate.
+
+Suppose:
+
+$$
+\eta=0.1
+$$
+
+We have:
+
+$$
+w=3
+$$
+
+and:
+
+$$
+\frac{\partial L}{\partial w}=-16
+$$
+
+Therefore:
+
+$$
+w_{\text{new}}
+=
+3-(0.1)(-16)
+$$
+
+$$
+=3+1.6
+$$
+
+$$
+=4.6
+$$
+
+So:
+
+```text
+before:
+
+w = 3.0
+
+        ↓ backward()
+
+gradient = -16
+
+        ↓ optimizer
+
+after:
+
+w = 4.6
+```
+
+Notice what happened:
+
+**The negative gradient caused the weight to increase.**
+
+That's exactly what we wanted because increasing `w` makes:
+
+$$
+y=wx
+$$
+
+closer to 10.
+
+---
+
+# 6. The PyTorch version
+
+```python
+import torch
+
+x = torch.tensor(2.0)
+
+w = torch.tensor(3.0, requires_grad=True)
+
+target = torch.tensor(10.0)
+
+optimizer = torch.optim.SGD([w], lr=0.1)
+
+for step in range(5):
+
+    y = w * x
+
+    loss = (y - target) ** 2
+
+    optimizer.zero_grad()
+
+    loss.backward()
+
+    optimizer.step()
+
+    print(
+        "step:", step,
+        "w:", w.item(),
+        "loss:", loss.item()
+    )
+```
+
+The important three lines are:
+
+```python
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+```
+
+Think of them as:
+
+```text
+clear old gradients
+        ↓
+calculate new gradients
+        ↓
+change weights
+```
+
+---
+
+# 7. Why `zero_grad()`?
+
+PyTorch normally **accumulates gradients**.
+
+Suppose:
+
+```text
+first example → gradient = -16
+second example → gradient = -8
+```
+
+Without clearing the first gradient, you could end up with:
+
+$$
+-16 + (-8)=-24
+$$
+
+That might not be what you want.
+
+So training normally starts with:
+
+```python
+optimizer.zero_grad()
+```
+
+Then:
+
+```python
+loss.backward()
+```
+
+calculates the gradients for the current batch.
+
+---
+
+# 8. Now let's connect this to your animal project
+
+Our semantic classifier was conceptually doing:
+
+```text
+animal
+  ↓
+numerical representation
+  ↓
+neural network
+  ↓
+scores for possible verbs
+```
+
+Suppose the possible verbs are:
+
+```text
+bark
+meow
+moo
+neigh
+```
+
+For:
+
+```text
+cow
+```
+
+the classifier might initially produce something like:
+
+```text
+bark   0.25
+meow   0.25
+moo    0.25
+neigh  0.25
+```
+
+It doesn't know anything yet.
+
+The correct answer is:
+
+```text
+moo
+```
+
+So we give the classifier a target:
+
+```text
+cow → moo
+```
+
+and calculate the classification loss.
+
+---
+
+# 9. Cross-entropy loss
+
+The classifier produces **logits**, something like:
+
+```text
+bark    1.2
+meow    0.7
+moo     2.8
+neigh   0.3
+```
+
+Softmax converts these into probabilities:
+
+```text
+bark    0.13
+meow    0.08
+moo     0.73
+neigh   0.06
+```
+
+The correct class is `moo`.
+
+So the loss is essentially:
+
+$$
+L=-\log(P(\text{moo}))
+$$
+
+Therefore:
+
+$$
+L=-\log(0.73)
+$$
+
+which is approximately:
+
+$$
+0.315
+$$
+
+That's a reasonably small loss.
+
+---
+
+# 10. What if the model gets it wrong?
+
+Suppose instead:
+
+```text
+bark    0.70
+meow    0.10
+moo     0.05
+neigh   0.15
+```
+
+The model thinks:
+
+> "Cow probably barks."
+
+But the training target says:
+
+> "No. Cow moos."
+
+Now:
+
+$$
+L=-\log(0.05)
+$$
+
+which is about:
+
+$$
+2.996
+$$
+
+Much larger.
+
+So the training signal is strong.
+
+---
+
+# 11. What does `backward()` do in the semantic classifier?
+
+This is the beautiful part.
+
+Suppose the network contains parameters:
+
+```text
+W1
+W2
+W3
+...
+```
+
+and the classifier produces:
+
+```text
+cow → [bark, meow, moo, neigh]
+```
+
+After calculating the loss:
+
+```python
+loss.backward()
+```
+
+PyTorch calculates things like:
+
+$$
+\frac{\partial L}{\partial W_1}
+$$
+
+$$
+\frac{\partial L}{\partial W_2}
+$$
+
+$$
+\frac{\partial L}{\partial W_3}
+$$
+
+etc.
+
+So instead of us saying:
+
+```text
+cow should be closer to moo
+```
+
+manually, the mathematical training process determines:
+
+> **Which parameters should change, and by how much, to make the correct answer more likely?**
+
+---
+
+# 12. What was the semantic classifier actually learning?
+
+This is an extremely important question.
+
+It was **not learning a symbolic rule** like:
+
+```python
+if animal == "cow":
+    return "moo"
+```
+
+Instead, it learned parameters that make:
+
+$$
+P(\text{moo}\mid\text{cow})
+$$
+
+large.
+
+And:
+
+$$
+P(\text{bark}\mid\text{cow})
+$$
+
+small.
+
+Likewise:
+
+$$
+P(\text{bark}\mid\text{dog})
+$$
+
+should become large.
+
+So after training we want approximately:
+
+```text
+             bark   meow   moo   neigh
+
+dog          high   low    low    low
+cat          low    high   low    low
+cow          low    low    high   low
+horse        low    low    low    high
+```
+
+That's what the classifier was learning.
+
+---
+
+# 13. What happens to the internal representation?
+
+This is even more interesting.
+
+Suppose the classifier has an embedding/hidden representation:
+
+```text
+cow → [0.31, -0.72, 0.44, ...]
+```
+
+and:
+
+```text
+dog → [0.82, 0.15, -0.33, ...]
+```
+
+The training process adjusts those representations **indirectly through gradients** so that the final classifier can distinguish the correct outputs.
+
+The network gradually creates an internal numerical structure that is useful for predicting:
+
+```text
+dog → bark
+cat → meow
+cow → moo
+horse → neigh
+```
+
+But remember:
+
+> We should not assume that the network has discovered the human concept of "animal sound" in exactly the way we think about it.
+
+It has learned a statistical mapping that works for its training objective.
+
+---
+
+# 14. The complete learning loop
+
+Your semantic classifier is essentially doing this:
+
+```text
+             "cow"
+                │
+                ▼
+          numerical input
+                │
+                ▼
+        neural network
+                │
+                ▼
+       logits for verbs
+                │
+                ▼
+             softmax
+                │
+                ▼
+        probabilities
+                │
+                ▼
+        compare with "moo"
+                │
+                ▼
+               LOSS
+                │
+                ▼
+         loss.backward()
+                │
+                ▼
+            gradients
+                │
+                ▼
+       optimizer.step()
+                │
+                ▼
+         updated weights
+                │
+                └──────────────┐
+                               │
+                         next training
+```
+
+Repeated thousands of times, the parameters gradually move toward values that produce the desired behavior.
+
+---
+
+# 15. One final distinction that's very important for our research
+
+There are three different statements:
+
+### A. Training data says:
+
+```text
+cow → moo
+```
+
+### B. Neural classifier learns:
+
+$$
+P(\text{moo}\mid\text{cow}) \gg
+P(\text{bark}\mid\text{cow})
+$$
+
+### C. A formal rule says:
+
+$$
+cow \rightarrow moo
+$$
+
+and perhaps explicitly:
+
+$$
+cow \not\rightarrow bark
+$$
+
+**A and B are machine-learning/statistical concepts. C is a logical/semantic constraint.**
+
+Our original animal experiment mainly demonstrated **B**, with the guardrail providing something closer to **C**.
+
+That distinction becomes very important when we later ask the much harder question:
+
+> **Can we put a semantic constraint into the loss function so that the neural network itself is trained to respect it?**
+
+That's where your PyTorch experiment starts becoming quite interesting from a **formal verification + AI** perspective.
+
+==============================================================
+
+* Why the **guardrail** is different from learning
+* How to make the model itself learn semantic constraints
+* Eventually, how this connects to your **pGCL/formal verification** work
+
+Yes. This is where your little **cow → moo** experiment connects to the much bigger question you've been exploring with pGCL and formal verification.
+
+There are really **three different ideas**:
+
+1. **Guardrail:** don't allow an invalid answer.
+2. **Semantic training:** change the neural network so it learns to prefer valid answers.
+3. **Formal verification:** mathematically prove properties about the system.
+
+Let's separate them carefully.
+
+---
+
+# 1. Why the guardrail is different from learning
+
+Our original system essentially looked like this:
+
+```text
+                  ┌─────────────────┐
+"cow → ?" ───────►│ Neural network  │
+                  └────────┬────────┘
+                           │
+                           ▼
+                       "bark"
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │  GUARDRAIL  │
+                    └──────┬──────┘
+                           │
+                      REJECT
+```
+
+The neural network may have produced:
+
+```text
+cow → bark
+```
+
+The guardrail then says:
+
+> No. According to my external rule, cow should be moo.
+
+It blocks the output.
+
+### The network itself hasn't necessarily changed.
+
+That's the crucial point.
+
+Suppose we run:
+
+```text
+cow → bark
+```
+
+100 times.
+
+The guardrail can reject it 100 times.
+
+But the underlying network may still have exactly the same weights.
+
+So:
+
+```text
+Guardrail:
+    controls the output
+
+Learning:
+    changes the parameters
+```
+
+---
+
+# 2. A simple analogy
+
+Imagine a student taking an exam.
+
+The student answers:
+
+> "2 + 2 = 5"
+
+The teacher has a red pen and crosses it out.
+
+That doesn't necessarily mean the student **learned** anything.
+
+A guardrail is like the red pen.
+
+Training is more like:
+
+```text
+wrong answer
+    ↓
+feedback
+    ↓
+change understanding
+    ↓
+try again
+```
+
+The latter actually changes the student's internal state.
+
+That's roughly the distinction we're interested in with neural networks.
+
+---
+
+# 3. How can the model itself learn the semantic constraint?
+
+We can add another training objective.
+
+Normally MiniGPT has a language loss:
+
+$$
+L_{\text{language}}
+$$
+
+which essentially asks:
+
+> Did you predict the next token correctly?
+
+We can introduce:
+
+$$
+L_{\text{semantic}}
+$$
+
+which asks:
+
+> Does the generated/represented meaning satisfy the semantic constraint?
+
+Then combine them:
+
+$$
+\boxed{
+L_{\text{total}}
+=
+L_{\text{language}}
++
+\lambda L_{\text{semantic}}
+}
+$$
+
+where \(\lambda\) controls how strongly the semantic requirement affects training.
+
+---
+
+# 4. What does that mean in our animal example?
+
+Suppose the model sees:
+
+```text
+The cow
+```
+
+and produces probabilities:
+
+```text
+moo      0.20
+bark     0.60
+meow     0.15
+neigh    0.05
+```
+
+The ordinary language loss might say:
+
+> The next token should be something associated with the training text.
+
+Our semantic loss can say:
+
+> For `cow`, `moo` should be preferred over `bark`.
+
+So we add an additional penalty.
+
+Conceptually:
+
+```text
+                 Transformer
+                     │
+          ┌──────────┴──────────┐
+          ▼                     ▼
+    language head         semantic head
+          │                     │
+          ▼                     ▼
+    language loss         semantic loss
+          │                     │
+          └──────────┬──────────┘
+                     ▼
+                total loss
+                     │
+                     ▼
+               backward()
+                     │
+                     ▼
+                 gradients
+                     │
+                     ▼
+              update weights
+```
+
+Now the semantic requirement participates in **backpropagation**.
+
+That's very different from our external guardrail.
+
+---
+
+# 5. What might semantic loss look like?
+
+Suppose our semantic classifier produces logits:
+
+```text
+bark   = 2.8
+meow   = 1.0
+moo    = 0.5
+neigh  = 0.2
+```
+
+For a cow, the correct class is `moo`.
+
+We could use ordinary cross-entropy:
+
+$$
+L_{\text{semantic}}
+=
+-\log P(\text{moo}\mid\text{cow})
+$$
+
+The optimizer then changes the network parameters so that, over training, the probability of `moo` increases.
+
+Eventually we might get:
+
+```text
+bark   = 0.2
+meow   = 0.3
+moo    = 4.5
+neigh  = 0.1
+```
+
+and therefore:
+
+```text
+moo ≫ bark
+```
+
+The model has now been trained to favor the semantic relationship.
+
+---
+
+# 6. But there is a very important limitation
+
+This does **not** automatically prove:
+
+$$
+cow \not\rightarrow bark
+$$
+
+It only means that the training objective strongly encourages it.
+
+For example, the model might learn:
+
+```text
+cow → moo
+```
+
+for every example in our training set.
+
+But perhaps an unusual prompt causes:
+
+```text
+cow → bark
+```
+
+The neural network is still a complicated numerical function.
+
+Training does not generally give us a mathematical guarantee for **every possible input**.
+
+This distinction is fundamental:
+
+> **Training produces behavior. Verification produces guarantees.**
+
+---
+
+# 7. Now we reach your pGCL connection
+
+This is where your work with **pGCL/GCL and Isabelle/HOL** becomes relevant.
+
+In formal verification, instead of saying:
+
+> "I tested this program 10,000 times and it seems correct."
+
+we try to state a mathematical property:
+
+$$
+P
+$$
+
+and prove:
+
+$$
+\{P\}\ C\ \{Q\}
+$$
+
+for a program \(C\).
+
+For probabilistic programs, pGCL lets us reason about things such as:
+
+* probabilistic choices
+* expectations
+* termination
+* invariants
+* probability of reaching states
+* quantitative correctness
+
+---
+
+# 8. Neural networks create a different verification problem
+
+Think about our neural network as a function:
+
+$$
+f_\theta(x)
+$$
+
+where:
+
+* \(x\) = input
+* \(\theta\) = millions of learned parameters
+* \(f\) = neural network
+
+For our animal example we might want:
+
+$$
+f_\theta(\text{cow})=\text{moo}
+$$
+
+But that's only one input.
+
+A stronger property would be:
+
+$$
+\forall x \in X,\quad
+\text{if }x\text{ describes a cow, then }f_\theta(x)\neq\text{bark}
+$$
+
+That's a **universal property**.
+
+And that's much closer to formal verification.
+
+---
+
+# 9. Three levels of confidence
+
+We can therefore think of our project as three increasingly strong levels.
+
+### Level 1 — Testing
+
+```text
+cow → moo       ✓
+dog → bark      ✓
+cat → meow      ✓
+horse → neigh   ✓
+```
+
+We tested examples.
+
+Useful, but no guarantee.
+
+---
+
+### Level 2 — Training
+
+We modify the objective:
+
+$$
+L=L_{\text{language}}+\lambda L_{\text{semantic}}
+$$
+
+Now the network is optimized to respect the semantic relationship.
+
+Better—but still no universal guarantee.
+
+---
+
+### Level 3 — Formal verification
+
+We specify something like:
+
+$$
+\forall x\in X:
+Cow(x)\Rightarrow \neg Bark(f_\theta(x))
+$$
+
+and attempt to **prove** it.
+
+That's the strongest level.
+
+---
+
+# 10. Where does pGCL fit?
+
+pGCL becomes especially interesting if the AI system itself is **probabilistic**.
+
+A language model doesn't simply behave like:
+
+$$
+f(x)=y
+$$
+
+It is closer to:
+
+$$
+P(y\mid x)
+$$
+
+For example:
+
+```text
+P(moo | cow)  = 0.92
+P(bark | cow) = 0.01
+P(meow | cow) = 0.03
+P(neigh | cow)= 0.04
+```
+
+Now we're dealing naturally with **probability**.
+
+You could formulate a requirement such as:
+
+$$
+P(\text{bark}\mid\text{cow})\leq\epsilon
+$$
+
+for some small \(\epsilon\).
+
+For example:
+
+$$
+P(\text{bark}\mid\text{cow})\leq0.01
+$$
+
+That starts looking much more like the kind of quantitative reasoning that pGCL is designed to support.
+
+---
+
+# 11. An even more interesting formulation
+
+Imagine an AI system that repeatedly generates actions:
+
+```text
+AI
+ ↓
+choose action
+ ↓
+environment
+ ↓
+new state
+ ↓
+AI
+ ↓
+choose action
+```
+
+Now we're dealing with a **probabilistic program / stochastic system**.
+
+We could ask:
+
+> What is the probability that the AI eventually reaches an unsafe state?
+
+For example:
+
+$$
+P(\text{unsafe state}) < 10^{-6}
+$$
+
+That's a much more substantial formal-verification problem than our cow example.
+
+---
+
+# 12. The architecture I'd eventually like us to build
+
+Your Python experiment can evolve toward:
+
+```text
+                   ┌─────────────────────┐
+                   │      AI MODEL       │
+                   │                     │
+input ────────────►│ Transformer         │
+                   │                     │
+                   └─────────┬───────────┘
+                             │
+                       probability
+                       distribution
+                             │
+                             ▼
+                    Semantic constraint
+                             │
+                    ┌────────┴────────┐
+                    │                 │
+                  training          verification
+                    │                 │
+                    ▼                 ▼
+              semantic loss      formal property
+                    │                 │
+                    ▼                 ▼
+              backpropagation     Isabelle/HOL
+                    │                 │
+                    ▼                 ▼
+              learned behavior    mathematical
+                                  guarantee
+```
+
+And potentially:
+
+```text
+                       pGCL
+                        │
+                        ▼
+              probabilistic behavior
+                        │
+                        ▼
+             quantitative property
+                        │
+                        ▼
+                   Isabelle/HOL
+```
+
+---
+
+# 13. The really important research question
+
+This leads to a question that is much more interesting than simply:
+
+> "Can we train a neural network to say cow → moo?"
+
+The deeper question is:
+
+> **Can we combine statistical learning with formally specified semantic or safety properties, and obtain useful guarantees about the resulting probabilistic AI system?**
+
+That connects several things you've been exploring:
+
+```text
+PyTorch
+   │
+   ├── neural networks
+   ├── embeddings
+   ├── Transformers
+   ├── gradient descent
+   └── semantic loss
+          │
+          ▼
+     probabilistic AI
+          │
+          ▼
+        pGCL
+          │
+          ▼
+   formal specification
+          │
+          ▼
+      Isabelle/HOL
+          │
+          ▼
+   machine-checked proof
+```
+
+And importantly, **we should not jump straight there**.
+
+Your animals project gives us a very good controlled experiment. The next useful step would be to modify that exact project so that **semantic loss is actually added to the MiniGPT training loop**, and then inspect the gradients and predictions before and after training.
+
+That would let you see, concretely, the difference between:
+
+**"a guardrail says NO"** versus **"the gradient changed the
+neural network so that it learns to say NO."**
+
+===============================================================
+And I won't assume that because you've worked with systems
+programming for decades, the ML/PyTorch terminology is already
+familiar.
+We can build the concepts from the ground up and then connect
+them to things you already understand.
+
+**Ask the first question whenever you're ready.**
+
+Absolutely. I think the **right next step for you is a conceptual map of ML**, without getting buried in calculus yet.
+
+The key idea is:
+
+> **Different types of learning describe where the training signal comes from. Gradient descent is one of the main mechanisms used to change the model's parameters in response to that signal.**
+
+So these are two different dimensions that are often mixed together.
+
+## 1. The big picture
+
+Think of ML as:
+
+**Data → Model → Prediction → Feedback → Parameter update**
+
+For example:
+
+```text
+             Training data
+                  │
+                  ▼
+          ┌────────────────┐
+          │     MODEL      │
+          │  parameters θ  │
+          └───────┬────────┘
+                  │
+                  ▼
+             prediction
+                  │
+                  ▼
+             ┌─────────┐
+             │  LOSS   │
+             └────┬────┘
+                  │
+                  ▼
+            gradient / signal
+                  │
+                  ▼
+          update parameters θ
+                  │
+                  └───────► repeat
+```
+
+**Gradient descent is primarily the parameter-update mechanism.**
+
+But the **loss/feedback signal** can come from very different sources.
+
+---
+
+# 2. The major types of machine learning
+
+I'd organize them into these categories:
+
+| Type                         | What does the model get?         | Typical goal                       |
+| ---------------------------- | -------------------------------- | ---------------------------------- |
+| **Supervised learning**      | Input + correct answer           | Learn `x → y`                      |
+| **Unsupervised learning**    | Input, no answers                | Discover structure                 |
+| **Self-supervised learning** | Input creates its own answer     | Learn representations/prediction   |
+| **Semi-supervised learning** | Some labeled + lots unlabeled    | Use both                           |
+| **Reinforcement learning**   | Rewards/penalties                | Learn actions that maximize reward |
+| **Generative learning**      | Examples of data                 | Learn how to generate similar data |
+| **Contrastive learning**     | Similar/dissimilar relationships | Learn useful representations       |
+
+These aren't mutually exclusive.
+
+For example, an LLM is largely trained using **self-supervised learning**, with gradient-based optimization, and can later be adapted using supervised and reinforcement-learning techniques.
+
+---
+
+# 3. Supervised learning
+
+This is probably the easiest place to start.
+
+Suppose:
+
+```text
+dog → bark
+cat → meow
+cow → moo
+horse → neigh
+```
+
+You provide:
+
+```text
+input             desired output
+--------------------------------
+dog               bark
+cat               meow
+cow               moo
+horse             neigh
+```
+
+The model produces a prediction:
+
+```text
+cow
+ ↓
+model
+ ↓
+bark = 0.10
+meow = 0.05
+moo  = 0.80
+neigh = 0.05
+```
+
+The correct answer is `moo`.
+
+So we calculate a **loss**.
+
+The loss says:
+
+> "How bad was that prediction?"
+
+Then gradient descent changes the model's parameters so that, next time, `moo` becomes more likely.
+
+### This is the connection we have already been exploring.
+
+Your animal example is essentially:
+
+```text
+                animal
+                   │
+                   ▼
+              neural net
+                   │
+                   ▼
+        probabilities for sounds
+                   │
+                   ▼
+                loss
+                   │
+                   ▼
+             backpropagation
+                   │
+                   ▼
+           gradient descent
+                   │
+                   ▼
+          update the weights
+```
+
+---
+
+# 4. What exactly is gradient descent doing?
+
+Suppose the model has parameters:
+
+```text
+θ = [θ1, θ2, θ3, ...]
+```
+
+Those are the learned numbers inside the network.
+
+Training asks:
+
+> Which direction should I move these numbers to make the loss smaller?
+
+The gradient tells us approximately that direction.
+
+Then gradient descent says:
+
+```text
+new parameters
+    =
+old parameters
+    -
+learning rate × gradient
+```
+
+You don't need the calculus yet.
+
+Conceptually:
+
+> **Gradient = information about which way to change the parameters.**
+
+> **Gradient descent = actually changing them.**
+
+And:
+
+> **Loss = tells us what "better" means.**
+
+This distinction is extremely important.
+
+---
+
+# 5. Supervised learning isn't synonymous with gradient descent
+
+This is an important point for your background.
+
+You can have:
+
+```text
+Supervised learning
+        │
+        ├── gradient descent
+        │
+        ├── stochastic gradient descent
+        │
+        ├── Adam
+        │
+        ├── AdamW
+        │
+        ├── Newton-type methods
+        │
+        ├── coordinate descent
+        │
+        └── other optimization methods
+```
+
+So:
+
+**learning type** ≠ **optimization algorithm**
+
+For neural networks, gradient-based methods dominate because neural networks can have millions/billions of continuous parameters.
+
+---
+
+# 6. Unsupervised learning
+
+Now suppose I give you:
+
+```text
+dog
+cat
+horse
+cow
+tiger
+lion
+apple
+orange
+banana
+```
+
+but don't tell the model what the categories are.
+
+There are no labels.
+
+The model tries to discover structure.
+
+For example, it might discover something resembling:
+
+```text
+          animals
+         /       \
+     domestic    wild
+      /   \       / \
+    dog   cat   lion tiger
+
+
+          fruit
+         / | \
+     apple orange banana
+```
+
+Typical techniques include:
+
+* clustering
+* dimensionality reduction
+* representation learning
+* density estimation
+* generative modeling
+
+Historically, algorithms such as **k-means** don't use gradient descent in the same way neural networks do.
+
+So already you can see why:
+
+> "Machine learning = gradient descent"
+
+is incorrect.
+
+Gradient descent is a **tool**, not the definition of ML.
+
+---
+
+# 7. Self-supervised learning — very important for LLMs
+
+This is where things become particularly relevant to what you're doing.
+
+An LLM doesn't need someone to manually label billions of sentences:
+
+```text
+The cat sat on the ___ → mat
+The dog chased the ___ → ball
+```
+
+Instead, the text itself supplies the training signal.
+
+For example:
+
+```text
+The cat sat on the mat
+```
+
+The model might see:
+
+```text
+The
+```
+
+and predict:
+
+```text
+cat
+```
+
+Then:
+
+```text
+The cat
+```
+
+predict:
+
+```text
+sat
+```
+
+Then:
+
+```text
+The cat sat
+```
+
+predict:
+
+```text
+on
+```
+
+etc.
+
+The data creates its own labels.
+
+That's why it's called **self-supervised**.
+
+Conceptually:
+
+```text
+        raw text
+           │
+           ▼
+     hide/shift target
+           │
+           ▼
+       prediction
+           │
+           ▼
+          loss
+           │
+           ▼
+      backpropagation
+           │
+           ▼
+     gradient update
+```
+
+This is extremely close to the MiniGPT experiment you've been building.
+
+---
+
+# 8. Why your MiniGPT experiment is interesting
+
+Your character-level MiniGPT does essentially:
+
+```text
+"What does a cow do?"
+          ↓
+      characters
+          ↓
+       embeddings
+          ↓
+      Transformer
+          ↓
+    next-character prediction
+          ↓
+         loss
+          ↓
+       gradients
+          ↓
+    update parameters
+```
+
+That's **self-supervised language-model training**.
+
+The training text itself supplies the target next character.
+
+But then we introduced:
+
+```text
+animal → expected sound
+```
+
+That's a **supervised semantic objective**.
+
+So your proposed next experiment:
+
+```text
+language loss
+       +
+semantic loss
+       ↓
+ total loss
+       ↓
+backpropagation
+       ↓
+gradient descent
+```
+
+is actually a very nice demonstration of **multi-objective learning**.
+
+---
+
+# 9. Reinforcement learning is different
+
+Now imagine a robot.
+
+There isn't necessarily a correct answer for every situation.
+
+Instead:
+
+```text
+state
+  ↓
+model
+  ↓
+action
+  ↓
+environment
+  ↓
+reward
+```
+
+Example:
+
+```text
+robot sees obstacle
+       ↓
+turn left
+       ↓
+doesn't crash
+       ↓
++10 reward
+```
+
+Or:
+
+```text
+robot sees obstacle
+       ↓
+goes straight
+       ↓
+crashes
+       ↓
+-100 reward
+```
+
+The model learns:
+
+> Which actions tend to produce good long-term outcomes?
+
+This is fundamentally different from:
+
+```text
+input → known correct answer
+```
+
+which is supervised learning.
+
+---
+
+# 10. Does reinforcement learning use gradient descent?
+
+Often, **yes**.
+
+For example, modern policy-gradient methods use gradients.
+
+Conceptually:
+
+```text
+policy/model
+     ↓
+action
+     ↓
+reward
+     ↓
+estimate how good action was
+     ↓
+gradient
+     ↓
+update model
+```
+
+But there are also reinforcement-learning algorithms that use other optimization/update mechanisms.
+
+Again:
+
+> **RL describes the source/nature of the learning signal.**
+
+> **Gradient descent describes one way of optimizing parameters.**
+
+---
+
+# 11. Contrastive learning
+
+This is another very useful concept for understanding modern AI.
+
+Suppose we give the model:
+
+```text
+"dog"
+picture of a dog
+```
+
+We want their representations to be close.
+
+But:
+
+```text
+"dog"
+picture of a car
+```
+
+should be far apart.
+
+So training says:
+
+```text
+similar pair   → pull together
+different pair → push apart
+```
+
+This produces a learned **representation space**.
+
+You can imagine:
+
+```text
+             dog
+            /   \
+          cat   wolf
+           \     /
+            animals
+
+                         car
+                        /   \
+                     truck  bus
+```
+
+This is particularly important because neural networks often don't simply learn answers—they learn **representations**.
+
+---
+
+# 12. Generative learning
+
+Now instead of asking:
+
+> "Is this a cat?"
+
+we ask:
+
+> "Can you generate something like the data you've seen?"
+
+For example:
+
+```text
+training data
+     ↓
+learn probability structure
+     ↓
+generate new examples
+```
+
+LLMs are generative models.
+
+They learn something approximating:
+
+```text
+P(next token | previous tokens)
+```
+
+and repeatedly sample/predict the next token.
+
+That's why:
+
+```text
+The cat sat on the ...
+```
+
+can become:
+
+```text
+The cat sat on the mat.
+```
+
+---
+
+# 13. Where optimization fits
+
+Here's the hierarchy I'd recommend keeping in your head:
+
+```text
+                 MACHINE LEARNING
+                       │
+          ┌────────────┼─────────────┐
+          │            │             │
+     Supervised    Unsupervised   Reinforcement
+          │            │             │
+          └────────────┼─────────────┘
+                       │
+                 LEARNING SIGNAL
+                       │
+                       ▼
+                    LOSS
+                / OBJECTIVE
+                       │
+                       ▼
+                 OPTIMIZATION
+                       │
+          ┌────────────┼────────────┐
+          │            │            │
+    Gradient       SGD/Adam     Other methods
+    descent
+          │
+          ▼
+       UPDATE
+      PARAMETERS
+          │
+          ▼
+       new model
+```
+
+That separation will help you tremendously.
+
+---
+
+# 14. And then there is backpropagation
+
+There are actually **three different ideas** that people often lump together:
+
+### Forward pass
+
+The model calculates an answer.
+
+```text
+input → network → prediction
+```
+
+### Loss calculation
+
+We compare prediction with the objective.
+
+```text
+prediction + target → loss
+```
+
+### Backward pass
+
+Backpropagation determines how each parameter contributed to the loss.
+
+```text
+loss
+ ↓
+gradient of loss
+ ↓
+parameter gradients
+```
+
+### Optimizer
+
+Then the optimizer changes the parameters.
+
+```text
+parameters + gradients
+          ↓
+       optimizer
+          ↓
+    new parameters
+```
+
+So:
+
+**backpropagation is not gradient descent.**
+
+Backpropagation computes the gradients.
+
+Gradient descent/Adam/etc. uses those gradients to update parameters.
+
+That's a distinction worth remembering.
+
+---
+
+# 15. The map to the concepts we've already covered
+
+Everything you've learned recently fits together:
+
+```text
+Tensor
+  ↓
+stores numerical data
+
+Embedding
+  ↓
+converts discrete IDs → learned vectors
+
+Neural network
+  ↓
+transforms vectors
+
+Transformer
+  ↓
+uses attention + feed-forward networks
+
+Prediction
+  ↓
+model output
+
+Loss
+  ↓
+measures error
+
+Backpropagation
+  ↓
+computes gradients
+
+Gradient descent / Adam
+  ↓
+updates weights
+
+Training
+  ↓
+repeat millions/billions of times
+```
+
+And your semantic experiment adds:
+
+```text
+                 Transformer
+                     │
+             ┌───────┴────────┐
+             │                │
+        language head     semantic head
+             │                │
+       language loss     semantic loss
+             │                │
+             └───────┬────────┘
+                     │
+                total loss
+                     │
+                backprop
+                     │
+                optimizer
+                     │
+                new weights
+```
+
+**This is the bridge from the basic PyTorch exercise you've been doing to modern ML training.**
+
+---
+
+## 16. What I'd suggest you learn next
+
+Given your goal—and your interest in formal verification—I would **not** jump immediately into the math.
+
+I'd build the conceptual foundation in this order:
+
+1. **What is a model?**
+2. **Parameters vs hyperparameters**
+3. **Training vs inference**
+4. **Supervised learning**
+5. **Unsupervised learning**
+6. **Self-supervised learning**
+7. **Reinforcement learning**
+8. **Representation learning**
+9. **Loss/objective functions**
+10. **Gradient descent**
+11. **SGD vs batch vs mini-batch**
+12. **Backpropagation**
+13. **Adam/AdamW**
+14. **Overfitting/generalization**
+15. **Train/validation/test**
+16. **Embeddings**
+17. **Neural networks**
+18. **Transformers**
+19. **LLM pretraining**
+20. **Fine-tuning / RLHF / preference optimization**
+21. **Semantic constraints**
+22. **Formal verification of learned systems**
+
+Then we can bring the math in **exactly where it becomes useful**, rather than learning calculus in isolation.
+
+And ultimately this gets us back to your particularly interesting question:
+
+> **Can we combine statistical learning, semantic constraints, probabilistic reasoning, and formal verification?**
+
+That's where your **PyTorch + MiniGPT + pGCL + Isabelle/HOL** interests start fitting together into one coherent picture.
+Yes. And I think there is a very useful way to make this question precise.
+
+The short answer is:
+
+> **Yes, these four ideas can be combined, but they play four different roles.**
+> Statistical learning *learns behavior*, semantic constraints *shape what behavior is acceptable*, probabilistic reasoning *quantifies uncertainty or likelihood*, and formal verification *proves properties of the resulting system or an abstraction of it*.
+
+The important part is understanding **where each one sits**.
+
+---
+
+# 1. One unified picture
+
+Imagine we are training our animal model.
+
+We want:
+
+> "Given an animal, produce its correct sound."
+
+But we want more than good average accuracy.
+
+We want something like:
+
+> **For every cow input, the system should not claim that the cow barks.**
+
+Now we have four layers:
+
+```text
+                    TRAINING DATA
+                         │
+                         ▼
+                ┌─────────────────┐
+                │ Statistical ML  │
+                │                 │
+                │ Learn parameters │
+                │       θ         │
+                └────────┬────────┘
+                         │
+                         ▼
+                    MODEL fθ(x)
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+              ▼                     ▼
+       semantic constraints     probability
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+                   MODEL BEHAVIOR
+                         │
+                         ▼
+                Formal specification
+                         │
+                         ▼
+                 Isabelle / HOL
+                         │
+                         ▼
+                    PROOF / FAIL
+```
+
+The really interesting question is:
+
+**Can the four layers interact rather than simply sit next to each other?**
+
+Yes.
+
+---
+
+# 2. Statistical learning answers one question
+
+Statistical learning asks:
+
+> **How can I learn a useful function from examples?**
+
+For example:
+
+```text
+dog  → bark
+cat  → meow
+cow  → moo
+horse → neigh
+```
+
+We represent the model as:
+
+```text
+fθ(x)
+```
+
+where `θ` represents millions or billions of learned parameters.
+
+Training finds parameters that perform well on the data.
+
+Conceptually:
+
+```text
+training examples
+       ↓
+     model
+       ↓
+     loss
+       ↓
+   optimization
+       ↓
+   parameters θ
+```
+
+But statistical learning by itself does **not** necessarily guarantee:
+
+> "The model will never violate this semantic rule."
+
+That's an important limitation.
+
+---
+
+# 3. Semantic constraints add knowledge about what is acceptable
+
+Suppose the model says:
+
+```text
+cow → bark
+```
+
+The training distribution might not contain enough examples to prevent this.
+
+We can explicitly introduce:
+
+```text
+cow → moo
+cow → NOT bark
+```
+
+This gives us a semantic constraint.
+
+For example:
+
+```text
+C(cow, bark) = false
+C(cow, moo)  = true
+```
+
+We can then incorporate this into training.
+
+Instead of:
+
+```text
+L = language loss
+```
+
+we might have:
+
+```text
+L_total =
+    L_language
+    +
+    λ L_semantic
+```
+
+Now the semantic constraint influences the gradients.
+
+That's the first important connection:
+
+> **Semantic constraints can become part of statistical learning through the loss function.**
+
+---
+
+# 4. But a loss is not a proof
+
+This is one of the most important distinctions.
+
+Suppose we train for 1 billion examples and obtain:
+
+```text
+accuracy = 99.999%
+```
+
+That is excellent statistically.
+
+But it does **not** prove:
+
+```text
+∀ x : cow(x) → ¬bark(f(x))
+```
+
+There could still be an input that causes:
+
+```text
+cow → bark
+```
+
+This is exactly where formal verification enters.
+
+---
+
+# 5. Formal verification asks a different question
+
+Statistical learning asks:
+
+> "Does the model usually behave correctly?"
+
+Formal verification asks:
+
+> **"Can we prove that a specified property holds?"**
+
+For example:
+
+```text
+∀ x.
+    Cow(x)
+    ⟶
+    output(x) ≠ Bark
+```
+
+If Isabelle/HOL can prove that statement from the formalized model/specification, that's fundamentally different from testing 10 million examples.
+
+---
+
+# 6. But here comes a major difficulty
+
+We cannot simply hand Isabelle a gigantic neural network and say:
+
+> "Prove that this LLM never makes a semantic mistake."
+
+At least, not in any simple general way.
+
+A neural network can contain:
+
+```text
+billions of parameters
+```
+
+and floating-point operations, nonlinearities, attention mechanisms, etc.
+
+So we usually need an **abstraction**.
+
+For example:
+
+```text
+        Neural network
+              │
+              ▼
+       abstraction/model
+              │
+              ▼
+      formal specification
+              │
+              ▼
+        Isabelle/HOL
+```
+
+This is an extremely important research concept.
+
+---
+
+# 7. Probabilistic reasoning adds another dimension
+
+LLMs don't normally produce a simple deterministic answer.
+
+They produce something resembling:
+
+```text
+P(bark | cow) = 0.001
+P(moo  | cow) = 0.995
+P(meow | cow) = 0.002
+P(neigh| cow) = 0.002
+```
+
+Now we can express a much richer requirement:
+
+> "The probability of an invalid semantic answer must be below ε."
+
+For example:
+
+```text
+P(bark | cow) < 0.001
+```
+
+Now we're no longer saying:
+
+```text
+cow → moo
+```
+
+as a simple deterministic rule.
+
+We're saying:
+
+> **The probability of violating the semantic constraint is very small.**
+
+That's a natural meeting point between ML and probabilistic reasoning.
+
+---
+
+# 8. And now pGCL becomes interesting
+
+This is where your pGCL work becomes relevant.
+
+Suppose the AI system behaves probabilistically:
+
+```text
+input
+  ↓
+neural model
+  ↓
+distribution over outputs
+  ↓
+decision
+  ↓
+environment
+```
+
+We might want to prove something like:
+
+> The probability of reaching an unsafe state is at most 0.001.
+
+Conceptually:
+
+```text
+P(reach Unsafe) ≤ 0.001
+```
+
+pGCL is designed around reasoning about **probabilistic programs** and properties such as probabilities, expectations, and termination.
+
+So one possible architecture is:
+
+```text
+             Neural model
+                  │
+                  ▼
+          probability model
+                  │
+                  ▼
+             abstraction
+                  │
+                  ▼
+                pGCL
+                  │
+                  ▼
+            Isabelle/HOL
+                  │
+                  ▼
+               PROOF
+```
+
+But there's an important qualification:
+
+> **pGCL does not automatically prove properties of an arbitrary neural network.**
+
+We need to construct a suitable formal probabilistic model/abstraction of the AI system.
+
+---
+
+# 9. There are actually two different ways constraints can enter
+
+This distinction is particularly interesting.
+
+### A. Constraints during learning
+
+We can influence the model:
+
+```text
+training
+   ↓
+semantic constraint
+   ↓
+semantic loss
+   ↓
+gradient
+   ↓
+updated parameters
+```
+
+The model is being **trained to behave better**.
+
+---
+
+### B. Constraints after learning
+
+We can leave the model unchanged:
+
+```text
+trained model
+     ↓
+semantic checker
+     ↓
+valid? ── YES → accept
+     │
+     NO
+     ↓
+reject / repair / ask again
+```
+
+This is the guardrail we already implemented.
+
+So:
+
+```text
+semantic constraint
+       │
+       ├── training constraint
+       │
+       └── runtime constraint
+```
+
+And you can actually use **both**.
+
+---
+
+# 10. A very powerful architecture
+
+Imagine:
+
+```text
+                 TRAINING DATA
+                      │
+                      ▼
+             ┌─────────────────┐
+             │   Neural Model  │
+             └────────┬────────┘
+                      │
+              ┌───────┴────────┐
+              │                 │
+              ▼                 ▼
+        language loss     semantic loss
+              │                 │
+              └────────┬────────┘
+                       ▼
+                  total loss
+                       │
+                       ▼
+                backpropagation
+                       │
+                       ▼
+                  optimizer
+                       │
+                       ▼
+                 trained model
+                       │
+                       ▼
+               ┌───────────────┐
+               │ semantic      │
+               │ verifier      │
+               └───────┬───────┘
+                       │
+                       ▼
+                formal model
+                       │
+                       ▼
+                Isabelle/HOL
+                       │
+                       ▼
+             quantitative proof
+```
+
+That's a legitimate research direction.
+
+---
+
+# 11. There is an even deeper connection
+
+We can think of the four concepts as four different questions:
+
+### Statistical learning
+
+**Can the system learn useful behavior from data?**
+
+### Semantic constraints
+
+**What behavior do we consider meaningful or acceptable?**
+
+### Probabilistic reasoning
+
+**How likely is each behavior?**
+
+### Formal verification
+
+**Can we mathematically prove that a specified property holds?**
+
+Put together:
+
+> **Learn a probabilistic model from data, constrain its semantics, and formally verify selected properties of the resulting system.**
+
+That is a much more precise statement than simply saying "AI + formal verification."
+
+---
+
+# 12. Where gradient descent fits
+
+Gradient descent is actually the least philosophically interesting part.
+
+It is primarily the **optimization engine**.
+
+For example:
+
+```text
+                     OBJECTIVE
+                         │
+             ┌───────────┴───────────┐
+             │                       │
+        language objective     semantic objective
+             │                       │
+             └───────────┬───────────┘
+                         │
+                         ▼
+                     total loss
+                         │
+                         ▼
+                  backpropagation
+                         │
+                         ▼
+                     gradients
+                         │
+                         ▼
+                 gradient descent
+                    / Adam / ...
+                         │
+                         ▼
+                  updated θ
+```
+
+The deeper research questions are:
+
+> **What objective should we optimize?**
+
+and
+
+> **What properties should hold independently of the training process?**
+
+---
+
+# 13. This also explains why formal verification is different from training
+
+Consider:
+
+```text
+Training:
+
+"Make violations unlikely."
+```
+
+versus:
+
+```text
+Formal verification:
+
+"Prove violations impossible under the specified assumptions."
+```
+
+Those are radically different claims.
+
+There is also a middle ground:
+
+```text
+Training:
+    minimize P(violation)
+
+Probabilistic verification:
+    prove P(violation) ≤ ε
+
+Formal verification:
+    prove violation = impossible
+```
+
+This three-level view is extremely useful.
+
+---
+
+# 14. And there is a fourth possibility: verified training
+
+Here's where things get particularly interesting.
+
+Instead of:
+
+```text
+train → verify
+```
+
+we could potentially have:
+
+```text
+          specification
+               │
+               ▼
+        constrained training
+               │
+               ▼
+           neural model
+               │
+               ▼
+         formal verifier
+               │
+          ┌────┴────┐
+          │         │
+         PASS      FAIL
+          │         │
+          ▼         ▼
+        model     counterexample
+                    │
+                    ▼
+               retraining
+```
+
+This is closely related to the **counterexample-guided** approach we discussed earlier.
+
+The verifier isn't merely saying:
+
+> "You failed."
+
+It can potentially provide a **counterexample**:
+
+```text
+Here is an input where your model violates the property.
+```
+
+That counterexample can become new training data.
+
+Then:
+
+```text
+AI proposes
+     ↓
+train
+     ↓
+verify
+     ↓
+counterexample
+     ↓
+train again
+     ↓
+verify again
+     ↓
+...
+```
+
+That is a very interesting bridge between **machine learning and formal methods**.
+
+---
+
+# 15. One caution about the word "prove"
+
+This is especially important for your eventual Isabelle work.
+
+Suppose Isabelle proves:
+
+```text
+∀ x ∈ X. P(f(x))
+```
+
+The proof is only as strong as the formal model `f` and assumptions `X`.
+
+If we abstract a neural network incorrectly, we might prove something about the **abstraction**, not the actual implementation.
+
+So the real research problem becomes:
+
+> **How do we construct a sound abstraction of a learned probabilistic system that is sufficiently precise to prove useful properties?**
+
+That is much more interesting than simply "put an LLM into Isabelle."
+
+---
+
+# 16. How your pGCL + Isabelle + PyTorch interests could fit
+
+I would visualize your eventual project like this:
+
+```text
+                     PyTorch
+                       │
+                       ▼
+                ┌──────────────┐
+                │ Neural model │
+                └──────┬───────┘
+                       │
+                       ▼
+                probabilities
+                       │
+                       ▼
+              semantic constraints
+                       │
+                       ▼
+              probabilistic model
+                       │
+                       ▼
+                     pGCL
+                       │
+                       ▼
+                  Isabelle/HOL
+                       │
+                       ▼
+             machine-checked proof
+```
+
+And alongside it:
+
+```text
+          Training
+             │
+             ▼
+      gradient descent
+             │
+             ▼
+      improve parameters
+```
+
+while:
+
+```text
+          Verification
+              │
+              ▼
+       prove properties
+```
+
+Those are **complementary**, not competing, activities.
+
+---
+
+## 17. The most important mental model
+
+If you remember only one diagram, I'd make it this:
+
+```text
+                  DATA
+                   │
+                   ▼
+             MACHINE LEARNING
+                   │
+             "learn behavior"
+                   │
+                   ▼
+                MODEL
+                   │
+         ┌─────────┴─────────┐
+         │                   │
+         ▼                   ▼
+ semantic constraints    probabilities
+ "what is acceptable?"   "how likely?"
+         │                   │
+         └─────────┬─────────┘
+                   ▼
+             SYSTEM BEHAVIOR
+                   │
+                   ▼
+          FORMAL SPECIFICATION
+                   │
+                   ▼
+             pGCL / HOL
+                   │
+                   ▼
+          MACHINE-CHECKED PROOF
+```
+
+And **gradient descent lives underneath the learning box** as one of the mechanisms for finding good model parameters.
+
+---
+
+### Where I would take you next
+
+Before going into the mathematics, I think the **next missing piece is "what exactly is a model learning?"**
+
+We can take one tiny model—say our **`dog → bark, cat → meow, cow → moo`** example—and follow **one complete training iteration** conceptually:
+
+**data → representation → prediction → probability → loss → backpropagation → gradient → parameter update → new prediction**
+
+Then we can put **supervised, self-supervised, reinforcement, probabilistic and semantic learning side-by-side** using that same tiny example. That would give you a very solid mental framework before we touch the deeper math.
+
+
+
+You're very welcome. Let's do it from the ground up, but keep the mathematics light. The goal is to make the **entire ML training loop visible** rather than having pieces like "loss," "backpropagation," and "gradient descent" feel like magic.
+
+# 1. One tiny problem
+
+Let's use only three animals:
+
+```text
+dog  → bark
+cat  → meow
+cow  → moo
+```
+
+Suppose we want a neural network to learn this mapping.
+
+We can represent the animals as IDs:
+
+```text
+dog = 0
+cat = 1
+cow = 2
+```
+
+and the sounds:
+
+```text
+bark = 0
+meow = 1
+moo  = 2
+```
+
+But remember an important point from our earlier discussion:
+
+> **0, 1, 2 are labels/IDs. They aren't the knowledge.**
+
+The knowledge will be stored in learned parameters.
+
+---
+
+# 2. What does the model actually contain?
+
+Let's make a tiny neural model:
+
+```text
+animal ID
+    ↓
+embedding
+    ↓
+small neural network
+    ↓
+3 output scores
+```
+
+For example:
+
+```text
+dog
+ ↓
+[0.2, -0.1, 0.7]
+ ↓
+neural network
+ ↓
+[bark score, meow score, moo score]
+```
+
+Those numbers inside the network are **parameters**.
+
+Imagine:
+
+```text
+W1, W2, b1, b2
+```
+
+Initially, they're essentially random.
+
+So initially the model knows nothing.
+
+---
+
+# 3. Training starts with an example
+
+Give it:
+
+```text
+cow → moo
+```
+
+The model processes `cow`.
+
+Suppose its output is:
+
+```text
+bark   = 2.0
+meow   = 1.5
+moo    = 0.5
+```
+
+These are called **logits**.
+
+The model is saying, roughly:
+
+```text
+bark:  highest
+meow:  second
+moo:   lowest
+```
+
+It is wrong.
+
+---
+
+# 4. Convert scores into probabilities
+
+We use softmax.
+
+We don't need the mathematics yet; conceptually:
+
+```text
+logits
+   ↓
+softmax
+   ↓
+probabilities
+```
+
+Maybe:
+
+```text
+bark   0.55
+meow   0.33
+moo    0.12
+```
+
+The model thinks:
+
+> "There's only a 12% chance the answer is moo."
+
+But the correct answer is:
+
+```text
+moo
+```
+
+---
+
+# 5. Now comes the loss
+
+The loss asks:
+
+> **How bad was that prediction?**
+
+Because the correct answer had probability only 0.12, the loss is relatively large.
+
+For a classification problem, cross-entropy is commonly used.
+
+Conceptually:
+
+```text
+correct probability = high
+       ↓
+small loss
+
+correct probability = low
+       ↓
+large loss
+```
+
+So:
+
+```text
+model prediction:
+moo = 0.12
+
+loss:
+HIGH
+```
+
+This is enormously important:
+
+> **The loss converts "the model was wrong" into a numerical signal that optimization can use.**
+
+---
+
+# 6. But how do we know which weights were responsible?
+
+This is where **backpropagation** comes in.
+
+Imagine the model has:
+
+```text
+10,000 parameters
+```
+
+and the loss is:
+
+```text
+L = 2.1
+```
+
+We want to know:
+
+> If I slightly changed parameter #1, would the loss get better or worse?
+
+Then parameter #2?
+
+Then #3?
+
+...
+
+Then #10,000?
+
+Backpropagation efficiently computes all of these sensitivities.
+
+Conceptually:
+
+```text
+                 LOSS
+                  │
+                  ▼
+          "Which parameters
+           caused this?"
+                  │
+                  ▼
+           BACKPROPAGATION
+                  │
+       ┌──────────┼──────────┐
+       ▼          ▼          ▼
+     ∂L/∂W1     ∂L/∂W2    ∂L/∂W3
+```
+
+Those quantities are **gradients**.
+
+---
+
+# 7. What does a gradient mean?
+
+Suppose:
+
+```text
+∂L/∂W1 = +0.8
+```
+
+That roughly means:
+
+> Increasing `W1` tends to increase the loss.
+
+So perhaps we should decrease it.
+
+Suppose:
+
+```text
+∂L/∂W2 = -1.2
+```
+
+That roughly means:
+
+> Increasing `W2` tends to decrease the loss.
+
+So perhaps we should increase it.
+
+The gradient therefore gives us a direction.
+
+---
+
+# 8. Gradient descent
+
+Now we actually change the parameters.
+
+The basic idea is:
+
+```text
+new weight
+    =
+old weight
+    -
+learning rate × gradient
+```
+
+Suppose:
+
+```text
+W1 = 0.50
+
+gradient = +0.8
+
+learning rate = 0.1
+```
+
+Then:
+
+```text
+new W1
+= 0.50 - 0.1 × 0.8
+= 0.42
+```
+
+So the parameter moves in a direction intended to reduce the loss.
+
+This is **gradient descent**.
+
+---
+
+# 9. Backpropagation and gradient descent are different
+
+This distinction is worth making crystal clear.
+
+### Backpropagation
+
+Computes:
+
+```text
+How should every parameter change?
+```
+
+It produces gradients.
+
+### Gradient descent
+
+Uses those gradients:
+
+```text
+Change the parameters.
+```
+
+So:
+
+```text
+prediction
+    ↓
+loss
+    ↓
+backpropagation
+    ↓
+gradients
+    ↓
+gradient descent / Adam
+    ↓
+new parameters
+```
+
+---
+
+# 10. Then we repeat
+
+We feed `cow` through the model again.
+
+Initially:
+
+```text
+cow → bark 0.55
+      meow 0.33
+      moo  0.12
+```
+
+After one update, maybe:
+
+```text
+cow → bark 0.48
+      meow 0.27
+      moo  0.25
+```
+
+Still wrong.
+
+Train again.
+
+Perhaps:
+
+```text
+cow → bark 0.30
+      meow 0.20
+      moo  0.50
+```
+
+Again.
+
+Eventually:
+
+```text
+cow → bark 0.01
+      meow 0.02
+      moo  0.97
+```
+
+Now the model has learned something.
+
+---
+
+# 11. But we don't train only on cow
+
+We repeatedly show:
+
+```text
+dog → bark
+cat → meow
+cow → moo
+```
+
+For example:
+
+```text
+dog → prediction → loss → update
+
+cat → prediction → loss → update
+
+cow → prediction → loss → update
+
+dog → prediction → loss → update
+
+...
+```
+
+Eventually the parameters encode patterns that allow the model to distinguish the animals.
+
+---
+
+# 12. This is the fundamental ML loop
+
+I'd memorize this:
+
+```text
+             ┌───────────────┐
+             │    INPUT      │
+             └───────┬───────┘
+                     ↓
+             ┌───────────────┐
+             │     MODEL     │
+             └───────┬───────┘
+                     ↓
+                prediction
+                     ↓
+             ┌───────────────┐
+             │     LOSS      │
+             └───────┬───────┘
+                     ↓
+             backpropagation
+                     ↓
+                  gradients
+                     ↓
+             optimizer
+          (SGD / Adam / ...)
+                     ↓
+             updated weights
+                     │
+                     └───────────┐
+                                 ↓
+                              repeat
+```
+
+That is the heart of neural-network training.
+
+---
+
+# 13. Now let's introduce the different kinds of learning
+
+The beautiful part is that the **middle of the loop can remain remarkably similar**.
+
+What changes is how we obtain the training signal.
+
+## Supervised learning
+
+We explicitly give the answer.
+
+```text
+input → known target
+```
+
+Example:
+
+```text
+cow → moo
+```
+
+Then:
+
+```text
+prediction vs target → loss
+```
+
+---
+
+# 14. Self-supervised learning
+
+Now imagine we're training a language model.
+
+Text:
+
+```text
+The cow eats grass.
+```
+
+We can construct:
+
+```text
+Input:  The cow eats
+Target: grass
+```
+
+No human had to label it.
+
+The text itself supplied the target.
+
+Then:
+
+```text
+prediction
+    ↓
+compare with actual next token
+    ↓
+loss
+    ↓
+backpropagation
+    ↓
+gradient update
+```
+
+This is why LLM pretraining can use enormous amounts of ordinary text.
+
+---
+
+# 15. Your MiniGPT is doing this
+
+Your character-level model does essentially:
+
+```text
+Input:
+
+"The cow moo"
+
+Target:
+
+next character
+```
+
+For example:
+
+```text
+"The cow m"
+        ↓
+predict "o"
+```
+
+Then:
+
+```text
+"The cow mo"
+        ↓
+predict "o"
+```
+
+Then:
+
+```text
+"The cow moo"
+        ↓
+predict "."
+```
+
+Each character prediction creates a training signal.
+
+So your MiniGPT is a **self-supervised language model**.
+
+---
+
+# 16. Now add our semantic constraint
+
+This is where things become especially interesting.
+
+Suppose the MiniGPT produces:
+
+```text
+"The cow barks."
+```
+
+Language-wise, this could be perfectly grammatical.
+
+But semantically:
+
+```text
+cow → bark
+```
+
+is wrong according to our knowledge.
+
+So we can introduce another objective:
+
+```text
+language loss
++
+semantic loss
+```
+
+For example:
+
+```text
+L_total =
+    L_language
+    +
+    λ L_semantic
+```
+
+The Transformer now receives two kinds of feedback.
+
+```text
+                 Transformer
+                      │
+             ┌────────┴────────┐
+             ↓                 ↓
+       language head     semantic head
+             ↓                 ↓
+       language loss     semantic loss
+             └────────┬────────┘
+                      ↓
+                  total loss
+                      ↓
+                 backprop
+                      ↓
+                  optimizer
+```
+
+This is the next step I would recommend implementing in your Python project.
+
+---
+
+# 17. Now compare this with reinforcement learning
+
+Suppose instead we have a robot.
+
+There isn't a predefined answer:
+
+```text
+left
+right
+forward
+```
+
+Instead:
+
+```text
+state
+ ↓
+model chooses action
+ ↓
+environment
+ ↓
+reward
+```
+
+For example:
+
+```text
+move left
+   ↓
+avoid obstacle
+   ↓
++10 reward
+```
+
+or:
+
+```text
+move right
+   ↓
+crash
+   ↓
+-100 reward
+```
+
+The reward becomes the training signal.
+
+So:
+
+```text
+Supervised:
+     target → loss
+
+Self-supervised:
+     data-derived target → loss
+
+Reinforcement:
+     reward → learning objective
+```
+
+But all can potentially involve optimization of parameters.
+
+---
+
+# 18. Now add probability
+
+Neural networks frequently don't simply say:
+
+```text
+moo
+```
+
+They produce a distribution:
+
+```text
+bark = 0.01
+meow = 0.02
+moo  = 0.97
+```
+
+That allows us to ask a much richer question:
+
+> How confident is the model?
+
+And eventually:
+
+```text
+P(incorrect semantic answer | input)
+```
+
+becomes something we can reason about.
+
+This is where **probabilistic reasoning** enters.
+
+---
+
+# 19. Now add formal verification
+
+Suppose our requirement is:
+
+```text
+For every cow input,
+the system must never output bark.
+```
+
+That's not merely:
+
+```text
+make bark unlikely
+```
+
+It's:
+
+```text
+prove the property.
+```
+
+So we might have:
+
+```text
+                 trained model
+                       │
+                       ▼
+              formal abstraction
+                       │
+                       ▼
+                specification
+                       │
+                       ▼
+                 Isabelle/HOL
+                       │
+                 ┌─────┴─────┐
+                 ↓           ↓
+                PROVE       FAIL
+```
+
+And if we use a probabilistic model:
+
+```text
+       probability of unsafe behavior
+                    │
+                    ▼
+              pGCL reasoning
+                    │
+                    ▼
+             Isabelle/HOL
+                    │
+                    ▼
+        prove P(unsafe) ≤ ε
+```
+
+That is where your pGCL interests become directly relevant.
+
+---
+
+# 20. One subtle but very important point
+
+There are actually **three levels of confidence** we can aim for.
+
+### Level 1 — Empirical
+
+Test the model:
+
+```text
+1 million examples
+99.9% correct
+```
+
+Good evidence, but no universal guarantee.
+
+### Level 2 — Statistical/probabilistic
+
+Establish something like:
+
+```text
+P(semantic violation) < 0.001
+```
+
+Much stronger, but still probabilistic.
+
+### Level 3 — Formal
+
+Prove:
+
+```text
+∀x ∈ specified domain:
+    semantic_property(x)
+```
+
+Now we have a mathematical guarantee **under the formal assumptions/model**.
+
+That distinction is central to trustworthy AI.
+
+---
+
+# 21. And this gives us a very interesting research loop
+
+You could imagine:
+
+```text
+                    DATA
+                     │
+                     ▼
+              Neural training
+                     │
+              gradient descent
+                     │
+                     ▼
+                 MODEL
+                     │
+             ┌───────┴────────┐
+             │                │
+             ▼                ▼
+       semantic test     probability
+             │                │
+             └───────┬────────┘
+                     ▼
+              Formal checker
+                     │
+              ┌──────┴──────┐
+              ↓             ↓
+            PASS          COUNTEREXAMPLE
+                            │
+                            ↓
+                     additional training
+                            │
+                            └───────► repeat
+```
+
+This is very close to the **CEGIS** idea we discussed earlier:
+
+> **Counterexample-Guided Inductive Synthesis**
+
+The model proposes behavior; the verifier tries to break it; the counterexample becomes information for the next iteration.
+
+---
+
+# 22. The deepest conceptual separation
+
+I'd keep these four statements in your mind:
+
+| Concept          | Main question                                        |
+| ---------------- | ---------------------------------------------------- |
+| **Learning**     | How do I acquire behavior from data?                 |
+| **Optimization** | How do I change parameters to improve the objective? |
+| **Probability**  | How uncertain/likely is the behavior?                |
+| **Verification** | Can I prove a specified property?                    |
+
+And **semantic constraints** sit between them:
+
+> They tell us what kinds of behavior we actually care about.
+
+---
+
+# 23. Where we are heading
+
+You now have enough conceptual background to understand a fairly sophisticated architecture:
+
+```text
+                    RAW DATA
+                       │
+                       ▼
+              SELF-SUPERVISED ML
+                       │
+                       ▼
+                  Transformer
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+             ▼                   ▼
+       language objective   semantic objective
+             │                   │
+             └─────────┬─────────┘
+                       ▼
+                 optimization
+                       │
+                  gradient
+                  descent/Adam
+                       │
+                       ▼
+                 trained model
+                       │
+                       ▼
+              probabilistic output
+                       │
+                       ▼
+             semantic constraints
+                       │
+                       ▼
+              formal abstraction
+                       │
+                       ▼
+                pGCL / Isabelle
+                       │
+                       ▼
+             machine-checked proof
+```
+
+And **this is why I would delay the heavier mathematics** for now. You already understand enough of the conceptual machinery that, when we eventually introduce derivatives, partial derivatives, Jacobians, chain rule, probability distributions, expectations, etc., you'll know **why each mathematical object exists and where it is being used**.
+
+The next particularly useful step would be to take our tiny `dog/cat/cow` network and make a **real PyTorch training loop of perhaps 20 lines**, then examine the actual numbers after each stage: **weights → prediction → loss → gradients → updated weights**. That would connect everything we've discussed directly to the code you're already running.
+
+

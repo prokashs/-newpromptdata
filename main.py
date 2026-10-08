@@ -22,6 +22,7 @@ dropout = 0.1
 semantic_epochs = 2000
 semantic_learning_rate = 0.01
 
+## can I use cuda soft stack
 device = "cuda" if torch.cuda.is_available() else (
     "mps" if torch.backends.mps.is_available() else "cpu"
 )
